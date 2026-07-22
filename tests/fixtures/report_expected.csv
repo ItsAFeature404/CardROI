@@ -1,0 +1,3 @@
+card_id,card_name,holding_count,closed_count,cost_basis,open_cost_basis,proceeds,realized_pnl,win_rate_pct
+1,LeBron James #123,1,1,100.00,0.00,150.00,50.00,100.00
+2,Stephen Curry #45,1,0,40.00,40.00,0.00,0.00,

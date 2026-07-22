@@ -1,0 +1,101 @@
+{
+  "portfolio": {
+    "holding_count": 2,
+    "closed_count": 1,
+    "cost_basis": "140.00",
+    "open_cost_basis": "40.00",
+    "proceeds": "150.00",
+    "realized_pnl": "50.00",
+    "win_rate": "1",
+    "unrealized_pnl": "0.00",
+    "appraised_open_count": 0
+  },
+  "cards": [
+    {
+      "card_id": 1,
+      "card_name": "LeBron James #123",
+      "holding_count": 1,
+      "closed_count": 1,
+      "cost_basis": "100.00",
+      "open_cost_basis": "0.00",
+      "proceeds": "150.00",
+      "realized_pnl": "50.00",
+      "win_rate_pct": "100.00"
+    },
+    {
+      "card_id": 2,
+      "card_name": "Stephen Curry #45",
+      "holding_count": 1,
+      "closed_count": 0,
+      "cost_basis": "40.00",
+      "open_cost_basis": "40.00",
+      "proceeds": "0.00",
+      "realized_pnl": "0.00",
+      "win_rate_pct": null
+    }
+  ],
+  "allocation_by_card": [
+    {
+      "label": "Stephen Curry #45",
+      "value": "40.00",
+      "allocation_pct": "1"
+    }
+  ],
+  "allocation_by_set": [
+    {
+      "label": "2023 Topps Chrome",
+      "value": "40.00",
+      "allocation_pct": "1"
+    }
+  ],
+  "concentration": {
+    "hhi": "1",
+    "effective_positions": "1"
+  },
+  "attribution_by_player": [
+    {
+      "label": "LeBron James",
+      "pnl": {
+        "holding_count": 1,
+        "closed_count": 1,
+        "cost_basis": "100.00",
+        "open_cost_basis": "0.00",
+        "proceeds": "150.00",
+        "realized_pnl": "50.00",
+        "win_rate": "1",
+        "unrealized_pnl": "0.00",
+        "appraised_open_count": 0
+      }
+    },
+    {
+      "label": "Stephen Curry",
+      "pnl": {
+        "holding_count": 1,
+        "closed_count": 0,
+        "cost_basis": "40.00",
+        "open_cost_basis": "40.00",
+        "proceeds": "0.00",
+        "realized_pnl": "0.00",
+        "win_rate": null,
+        "unrealized_pnl": "0.00",
+        "appraised_open_count": 0
+      }
+    }
+  ],
+  "attribution_by_sport": [
+    {
+      "label": "Basketball",
+      "pnl": {
+        "holding_count": 2,
+        "closed_count": 1,
+        "cost_basis": "140.00",
+        "open_cost_basis": "40.00",
+        "proceeds": "150.00",
+        "realized_pnl": "50.00",
+        "win_rate": "1",
+        "unrealized_pnl": "0.00",
+        "appraised_open_count": 0
+      }
+    }
+  ]
+}

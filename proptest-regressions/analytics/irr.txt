@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3018400a3a141755a538b523843dfd5da042a96097543a17596b7934d9299fd1 # shrinks to raw_flows = [(37, -1497447), (2636, -6101982), (2662, 4400122)]
+cc 9555501976892bd50b888a4a7c774b23d80911650a94b7ce941675dc943a5b65 # shrinks to raw_flows = [(3396, 5128679), (477, 1866533), (840, -324004), (385, -909353)]
+cc 9201c628cb05baacb7f1b8c7fab3c0029c0b76ffd18d958e88fb1417ee52ed39 # shrinks to raw_flows = [(25, 3310807), (3470, -8467209), (1003, 3677568), (347, 2077757), (3556, 4336117)]

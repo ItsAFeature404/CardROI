@@ -1,0 +1,7 @@
+# Force LF line endings on checkout regardless of platform/git config.
+# Windows runners default to core.autocrlf=true, which silently rewrites
+# committed LF files to CRLF on checkout - broke the golden-file report
+# tests (tests/fixtures/report_expected.{csv,json}) comparing our
+# LF-only program output against a CRLF fixture. Everything in this repo
+# is text; there are no binary assets to exclude.
+* text=auto eol=lf

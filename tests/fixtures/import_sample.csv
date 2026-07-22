@@ -1,0 +1,3 @@
+set_name,sport,set_year,set_brand,card_number,player_name,variant,parallel_name,print_run,is_rookie,is_autograph,is_relic,serial_number,grade,grading_company,cert_number,acquired_date,price,fees,shipping,tax,other_cost,counterparty,platform,external_ref,notes
+2023 Topps Chrome,Basketball,2023,Topps,123,LeBron James,Refractor,Gold,25,false,false,false,12/25,10,PSA,123456,2026-01-01,500.00,25.00,10.00,0.00,0.00,John Doe,eBay,ORDER-1,First card
+2023 Topps Chrome,Basketball,2023,Topps,45,Stephen Curry,,,,,,,,,,,2026-01-05,80.00,5.00,,,,,COMC,,

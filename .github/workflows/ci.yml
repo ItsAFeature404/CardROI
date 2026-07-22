@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all-targets --all-features
+
+      - name: Build (release)
+        run: cargo build --release
+
+  msrv:
+    name: msrv (1.88)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cargo.toml pins rust-version = "1.88" but the `test` job above only
+      # ever builds against whatever dtolnay/rust-toolchain@stable resolves
+      # to - this job enforces the pin directly rather than just documenting
+      # it and trusting stable never drifts past it by accident.
+      - name: Install pinned MSRV toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build against pinned MSRV
+        run: cargo build --all-targets --all-features
+
+      - name: Test against pinned MSRV
+        run: cargo test --all-targets --all-features
+
+  web-build:
+    name: web build (wasm32-unknown-unknown)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # sqlite-wasm-rs's build script compiles SQLite's C source to
+      # wasm32-unknown-unknown, which needs a wasm-capable clang - already
+      # present on ubuntu-latest runners.
+      - name: Clippy (deny warnings)
+        run: cargo clippy -p cardroi-web --target wasm32-unknown-unknown --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build -p cardroi-web --target wasm32-unknown-unknown --release
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    # rustsec/audit-check@v2 posts its results as a check run, which needs
+    # `checks: write` on GITHUB_TOKEN.
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

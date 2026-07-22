@@ -1,0 +1,25 @@
+[
+  {
+    "set_name": "2024 Bowman",
+    "sport": "Baseball",
+    "set_year": 2024,
+    "set_brand": "Bowman",
+    "card_number": "1",
+    "player_name": "Someone Prospect",
+    "is_rookie": true,
+    "acquired_date": "2026-02-01",
+    "price": "20.00",
+    "fees": "1.00",
+    "platform": "COMC"
+  },
+  {
+    "set_name": "2024 Bowman",
+    "sport": "Baseball",
+    "set_year": 2024,
+    "set_brand": "Bowman",
+    "card_number": "2",
+    "player_name": "Another Prospect",
+    "acquired_date": "2026-02-02",
+    "price": "15.00"
+  }
+]

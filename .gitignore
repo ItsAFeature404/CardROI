@@ -1,0 +1,24 @@
+/target
+node_modules/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+.DS_Store
+*.swp
+
+# Local tooling / internal process artifacts - not part of the shipped
+# product, stay on this machine only.
+CLAUDE.md
+SPEC.md
+VISION.md
+skills-lock.json
+.agents/
+tasks/
+docs/
+# Whole directory, not just settings.local.json/worktrees/ - those were
+# previously only excluded via a global user-level gitignore and a
+# non-versioned .git/info/exclude, neither of which travels with the repo
+# to a fresh clone or another machine.
+.claude/

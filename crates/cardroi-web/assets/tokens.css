@@ -1,0 +1,77 @@
+/* CardROI design tokens. Every color/font/radius/motion value the app
+ * uses lives here, as a CSS custom property - nothing hard-coded in a
+ * component. See tasks/plan.md Task 3.3 for the reasoning behind each
+ * decision; this file is the literal values.
+ *
+ * Dark is the default/primary theme (this is professional financial
+ * software used for extended sessions, not a marketing page); light is
+ * a real, fully-specified second theme, not an afterthought.
+ */
+
+:root,
+[data-theme="dark"] {
+  /* Elevation: tone-shift is the primary depth cue. Three flat levels -
+   * canvas (the app background), surface (a panel/sidebar/table), and
+   * surface-elevated (a nested panel or hovered row) - each one step
+   * lighter, no shadow. --shadow-floating is reserved ONLY for actually
+   * floating/transient UI (modals, popovers, command palette). */
+  --color-canvas: #12161f;
+  --color-surface: #1a1f2b;
+  --color-surface-elevated: #232938;
+  --shadow-floating: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+  --color-border: #2c3344;
+
+  --color-text-primary: #e8eaf0;
+  --color-text-secondary: #9ba3b7;
+  --color-text-tertiary: #6b7385;
+
+  /* Accent budget: exactly four colors with meaning, ever. */
+  --color-gold: #c9a227; /* primary - BGS Pristine-10's own gold, the hobby's vocabulary for "top tier" */
+  --color-gold-muted: #a6841e;
+  --color-emerald: #1c6e4a; /* secondary - genuinely rare, never competes with gold */
+  --color-gain: #56b4e9; /* Okabe-Ito sky blue - colorblind-safe gain encoding */
+  --color-loss: #e69f00; /* Okabe-Ito orange - colorblind-safe loss encoding */
+}
+
+[data-theme="light"] {
+  --color-canvas: #f7f3ec; /* warm paper, not stark white */
+  --color-surface: #fcfaf6;
+  --color-surface-elevated: #ffffff;
+  --shadow-floating: 0 8px 24px rgba(32, 28, 20, 0.18);
+
+  --color-border: #e3dccf;
+
+  --color-text-primary: #201c14;
+  --color-text-secondary: #6b6455;
+  --color-text-tertiary: #948c7a;
+
+  /* Same four hues, deepened for contrast against a light background. */
+  --color-gold: #8a6a12;
+  --color-gold-muted: #6f5510;
+  --color-emerald: #146241;
+  --color-gain: #0072b2; /* Okabe-Ito blue (deeper variant) */
+  --color-loss: #b97800; /* Okabe-Ito orange (deeper variant) */
+}
+
+:root {
+  /* Typography: three distinct fonts, three distinct jobs. Never mixed. */
+  --font-data: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace; /* identifiers only - cert numbers, pop-report codes - never money */
+  --font-brand: "Source Serif 4", Georgia, serif; /* brand/empty-state moments only - never a number or table */
+  --font-weight-brand: 300; /* Light - editorial/mature, not luxury-brand-heavy */
+
+  /* One radius, everywhere, deliberately near-zero - a "trading terminal"
+   * register, not shadcn's default 0.5rem and not a pill shape. */
+  --radius: 2px;
+
+  /* One easing curve, one duration, used identically everywhere. No
+   * spring/bounce physics anywhere in the app. */
+  --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-standard: 220ms;
+
+  /* Icons: Lucide, monochrome via currentColor. Two sizes, never mixed
+   * within one context. */
+  --icon-size-dense: 16px; /* tables, badges */
+  --icon-size-nav: 20px; /* sidebar nav */
+}

@@ -1,0 +1,97 @@
+[workspace]
+# The root package below (`cardroi`, the CLI+lib) is implicitly a
+# workspace member because this file has both [workspace] and [package] -
+# only the *additional* member needs listing. `cardroi-web` lives in its
+# own crate rather than a src/ui/ submodule because Dioxus's own tooling
+# (dx serve/dx bundle) expects a dedicated crate to run against, and it
+# depends on this crate as a library so there's no parallel data layer.
+members = ["crates/cardroi-web"]
+
+[package]
+name = "cardroi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["CardROI Contributors"]
+description = "Local-first, precision investment portfolio management for trading card collectors"
+license = "MIT"
+readme = "README.md"
+keywords = ["trading-cards", "portfolio", "roi", "accounting", "cli"]
+categories = ["command-line-utilities", "finance"]
+
+[[bin]]
+name = "cardroi"
+path = "src/main.rs"
+
+[lib]
+name = "cardroi"
+path = "src/lib.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Database - split by target below (native compiles real SQLite from C
+# source via `bundled`; wasm32 has no C toolchain and instead uses
+# rusqlite's own default `ffi-sqlite-wasm-rs` backend - same public
+# Connection/params!/query_row API either way, so src/db/repository/*.rs
+# needs no target-specific code).
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+csv = "1"
+
+# Money & precision
+rust_decimal = { version = "1", features = ["serde-str"] }
+
+# Holding photos: decode/resize/re-encode uploaded images, and hash them
+# for on-disk content-addressed dedup (see db::repository::holding_images).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+sha2 = "0.10"
+
+# Dates
+chrono = { version = "0.4", features = ["serde"] }
+
+# Errors
+anyhow = "1"
+thiserror = "2"
+
+# Logging / diagnostics
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# bundled/backup aren't valid off native (no C toolchain, no filesystem to
+# back up) - wasm32 gets rusqlite's default features instead, which is
+# exactly the ffi-sqlite-wasm-rs backend per rusqlite's own Cargo.toml, so
+# no explicit `features = [...]` is needed here at all.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rusqlite = { version = "0.40", features = ["bundled", "backup"] }
+comfy-table = "7"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rusqlite = { version = "0.40" }
+# comfy-table's default `tty` feature pulls in a crossterm build with no
+# wasm32-unknown-unknown backend at all - CLI table rendering is CLI-only
+# code cardroi-web never calls, so losing `tty`'s terminal-width
+# auto-detection on this target is a pure compile fix, not a real feature
+# loss.
+comfy-table = { version = "7", default-features = false }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+proptest = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+# A crash on arithmetic overflow beats silently wrapping Money into a wrong
+# number - the whole point of this software is exact financial precision.
+overflow-checks = true
+
+[profile.dev.package."*"]
+opt-level = 2

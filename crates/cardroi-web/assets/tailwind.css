@@ -1,0 +1,52 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/* Maps the design tokens above into Tailwind's own theme, so utilities
+ * like `bg-canvas`, `text-gold`, `border-border`, `rounded-radius` are
+ * available everywhere - still ultimately driven by the CSS custom
+ * properties in tokens.css, not duplicated here. */
+@theme {
+  --color-canvas: var(--color-canvas);
+  --color-surface: var(--color-surface);
+  --color-surface-elevated: var(--color-surface-elevated);
+  --color-border: var(--color-border);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-tertiary: var(--color-text-tertiary);
+  --color-gold: var(--color-gold);
+  --color-gold-muted: var(--color-gold-muted);
+  --color-emerald: var(--color-emerald);
+  --color-gain: var(--color-gain);
+  --color-loss: var(--color-loss);
+
+  --font-data: var(--font-data);
+  --font-mono: var(--font-mono);
+  --font-brand: var(--font-brand);
+
+  --radius-radius: var(--radius);
+
+  --ease-standard: var(--ease-standard);
+  --duration-standard: var(--duration-standard);
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-text-primary);
+  font-family: var(--font-data);
+}
+
+/* Tabular numerals on every number, everywhere - non-negotiable per the
+ * design research, so it's a base rule, not something each screen has to
+ * remember to apply. */
+.data-numeral {
+  font-variant-numeric: tabular-nums;
+}
+
+.font-identifier {
+  font-family: var(--font-mono);
+}
+
+.font-brand {
+  font-family: var(--font-brand);
+  font-weight: var(--font-weight-brand);
+}

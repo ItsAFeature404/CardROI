@@ -1,0 +1,59 @@
+[package]
+name = "cardroi-web"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["CardROI Contributors"]
+description = "Browser-based (Dioxus/WASM) build of CardROI (Phase 3.5) - not published, not part of the CLI's MSRV/versioning promises"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "cardroi-web"
+path = "src/main.rs"
+
+[dependencies]
+# The whole point of this crate: reuse the exact same db/analytics layer
+# the CLI already uses, via a path dependency - never a parallel data
+# path. Same reasoning as cardroi-desktop; see SPEC.md's Phase 3.5 section.
+cardroi = { path = "../.." }
+
+dioxus = { version = "0.7", features = ["web", "router"] }
+thiserror = "2"
+# Lucide icons via the same crate cardroi-desktop uses (Task 3.3) - same
+# design system, not a second one.
+dioxus-free-icons = { version = "0.10", features = ["lucide"] }
+# Same versions as the root crate's Cargo.toml - these are its types
+# (Money/RollupPnl fields, Transaction::transaction_date) passed straight
+# through, never a separate copy. Same reasoning cardroi-desktop's
+# Cargo.toml already documents for its own identical lines.
+rust_decimal = "1"
+chrono = "0.4"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# rusqlite and sqlite-wasm-rs are already in the dependency graph
+# transitively (via cardroi and via rusqlite's own optional
+# ffi-sqlite-wasm-rs feature), but a transitive dependency isn't
+# importable by name unless this crate also declares it directly - same
+# reason getrandom below needs a direct line even though nothing here
+# calls it explicitly. No explicit `features` needed on either: rusqlite
+# picks up its own default `ffi-sqlite-wasm-rs` backend on wasm32 (see
+# root Cargo.toml's comment), and sqlite-wasm-rs's `WasmOsCallback` is a
+# plain public item, not feature-gated.
+rusqlite = "0.40"
+sqlite-wasm-rs = "0.5"
+# getrandom is only ever a transitive dependency here - it must still be
+# declared directly to activate its wasm_js feature, since Cargo's feature
+# unification only turns a feature on for a version actually present in
+# this crate's own manifest. Confirmed against getrandom 0.3.4's own docs
+# specifically (not the latest 0.4.x docs, which use a different
+# mechanism) - the old RUSTFLAGS/cfg backend-selection approach is
+# deprecated and now does nothing per 0.3.4's own documentation.
+getrandom = { version = "0.3", features = ["wasm_js"] }
+# RelaxedIdbVFS lives here, not in sqlite-wasm-rs itself (that crate only
+# ships the raw FFI bindings + a default in-memory VFS) - confirmed by
+# reading sqlite-wasm-rs's own README directly, not assumed. IndexedDB
+# storage, main-thread-safe, no COOP/COEP headers needed - the right
+# choice for v1 per docs/ideas/cardroi-web.md's "good enough, not
+# bulletproof" requirement.
+sqlite-wasm-vfs = "0.2"
