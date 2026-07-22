@@ -2,6 +2,14 @@
 
 [![CI](https://github.com/ItsAFeature404/CardROI/actions/workflows/ci.yml/badge.svg)](https://github.com/ItsAFeature404/CardROI/actions/workflows/ci.yml)
 
+**🚧 Actively in development.** The core ledger and analytics are solid
+and tested, but the app is missing pieces a first-time visitor would
+expect — no Settings screen, no Ledger screen, no way to scan/photograph
+a card yet. See [Status & Roadmap](#status--roadmap) before you rely on
+it for anything real.
+
+**[Try it live →](https://itsafeature404.github.io/CardROI/)**
+
 A local-first investment portfolio manager for trading card collectors —
 open it in a phone or computer browser, no install, no account. Every
 acquisition cost, sale proceed, fee, shipping expense, tax, and comp (a
@@ -30,7 +38,7 @@ your device unless you explicitly export it.
 - [Development](#development)
 - [Contributing](#contributing)
 - [Security](#security)
-- [Status](#status)
+- [Status & Roadmap](#status--roadmap)
 - [License](#license)
 
 ## Features
@@ -50,8 +58,8 @@ your device unless you explicitly export it.
   danger-zone delete), Buy/Sell/Comp entry forms, an advanced performance
   view (IRR/TWR behind a "Show advanced" toggle) and a risk/allocation
   view (diversification score, concentration bar, allocation donut).
-- See [Status](#status) for exactly what's built versus still in
-  progress.
+- See [Status & Roadmap](#status--roadmap) for exactly what's built
+  versus still in progress.
 
 **Catalog & ledger**
 - `Set → Card → Holding → Transaction` data model: cards are catalog
@@ -141,10 +149,14 @@ added to the home screen — closing and relaunching it like a native app.
 Two practical consequences worth knowing:
 - Your phone and your computer, or two different browsers, each hold
   their own separate copy of your data — there's no sync between them
-  (not yet built; see [Status](#status)).
+  (not yet built; see [Status & Roadmap](#status--roadmap)).
 - Clearing that browser's site data for this page deletes your CardROI
   data completely and permanently, the same as deleting a file — there's
   no server copy to recover it from.
+
+**Live at [itsafeature404.github.io/CardROI](https://itsafeature404.github.io/CardROI/)**,
+deployed straight from `main` via GitHub Actions/Pages — no separate
+build step to trust, what's in the repo is what's running.
 
 **Running it yourself:**
 
@@ -165,8 +177,6 @@ utility class in a `.rs` file, recompile by hand from `crates/cardroi-web/`:
 ```bash
 ./node_modules/.bin/tailwindcss -i assets/tailwind.css -o assets/tailwind.generated.css
 ```
-
-There's no public, deployed version yet — see [Status](#status).
 
 ## Precision, trust & the audit trail
 
@@ -208,7 +218,7 @@ collectors should reach for day to day. Everything in
 
 ### Install / build
 
-Requires Rust 1.88+ (2024 edition). On Windows, a C toolchain (MSVC Build
+Requires Rust 1.95+ (2024 edition). On Windows, a C toolchain (MSVC Build
 Tools or MinGW-w64) is needed to compile the bundled SQLite.
 
 ```bash
@@ -479,30 +489,55 @@ crosses the network. The CLI has no network code at all. See
 [`SECURITY.md`](SECURITY.md) for the realistic attack surface and how to
 report a vulnerability privately.
 
-## Status
+## Status & Roadmap
 
-The app is the primary, actively-developed interface. Built and
-cross-checked against the CLI's own output: real SQLite persistence in
-the browser (confirmed surviving a tab reload, full browser close/
-reopen, and a home-screen-installed close/reopen on a real phone), a
-responsive nav shell, Dashboard, Portfolio (grouping + pagination,
-verified against a 10,000+ holding synthetic database), per-holding
-drill-down (transaction/comp history, What-If, Mark Lost/Damaged, inline
-edit, and delete), Buy/Sell/Comp forms, an advanced performance view
-(IRR/TWR), and a risk/allocation view (diversification score, by-set/
-player/sport allocation).
+**This project is under active development.** The ledger and analytics
+engine are complete and well-tested, but the app is deliberately shipped
+early and openly, with real gaps — don't rely on it for anything you
+can't afford to re-enter by hand yet, and expect the below to change
+often.
 
-Not yet built: a Ledger screen and a Settings screen (both still
-placeholders), an in-browser import/export UI, a public deployment (the
-app currently has to be run locally via `dx serve` — see
-[The app](#the-app)), and a Playwright end-to-end test suite.
-Tax/insurance reporting and an HTML/PDF dashboard are planned after that
-but not started.
+**Works today**, cross-checked against the CLI's own output: real SQLite
+persistence in the browser (confirmed surviving a tab reload, full
+browser close/reopen, and a home-screen-installed close/reopen on a
+real phone), a responsive nav shell, Dashboard, Portfolio (grouping +
+pagination, verified against a 10,000+ holding synthetic database),
+per-holding drill-down (transaction/comp history, What-If, Mark Lost/
+Damaged, inline edit, and delete), Buy/Sell/Comp forms, an advanced
+performance view (IRR/TWR), and a risk/allocation view (diversification
+score, by-set/player/sport allocation).
 
-The engine and CLI underneath it are complete: catalog CRUD, buy/sell,
-edit/delete, CSV/JSON import, realized/unrealized P&L, comps, XIRR,
-time-weighted return, portfolio analytics, loss/damage tracking, and
-what-if scenario modeling are all built and tested.
+**In the nav, but not built yet** — clicking these gets you an honest
+"not built yet" placeholder, not a broken screen:
+- **Settings** — nothing configurable yet.
+- **Ledger** — the full mutation history exists in the database (every
+  screen's numbers already come from it) but there's no dedicated view
+  of it yet.
+
+**Not in the app at all yet** (no menu entry, no placeholder):
+- **Scanning/photographing a card.** Every card and holding is entered
+  by typing its details in — there's no camera capture. The desktop
+  prototype this project evolved from had one; it didn't carry over to
+  the web rebuild and needs a from-scratch design for a browser camera
+  API before it comes back.
+- **In-browser import/export.** CSV/JSON import exists and is tested,
+  but only via the CLI (`cardroi import`) — no UI for it yet.
+- **Cross-device sync.** See [The app](#the-app) above — each browser's
+  data is currently its own island.
+- A Playwright end-to-end test suite, and beyond that, tax/insurance
+  reporting and an HTML/PDF dashboard — both still unspecced.
+
+The engine and CLI underneath all of this are complete: catalog CRUD,
+buy/sell, edit/delete, CSV/JSON import, realized/unrealized P&L, comps,
+XIRR, time-weighted return, portfolio analytics, loss/damage tracking,
+and what-if scenario modeling are all built and tested — the roadmap
+above is entirely about surfacing more of that engine in the app, not
+building new financial logic.
+
+Longer-term direction and day-to-day progress live in
+[GitHub Issues](https://github.com/ItsAFeature404/CardROI/issues) rather
+than a separate roadmap document — a `planned` label marks accepted,
+not-yet-started work; open ones under active work get assigned.
 
 ## License
 
