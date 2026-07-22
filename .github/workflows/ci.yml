@@ -39,19 +39,24 @@ jobs:
         run: cargo build --release
 
   msrv:
-    name: msrv (1.88)
+    name: msrv (1.95)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Cargo.toml pins rust-version = "1.88" but the `test` job above only
+      # Cargo.toml pins rust-version = "1.95" but the `test` job above only
       # ever builds against whatever dtolnay/rust-toolchain@stable resolves
       # to - this job enforces the pin directly rather than just documenting
-      # it and trusting stable never drifts past it by accident.
+      # it and trusting stable never drifts past it by accident. 1.95 is
+      # not an arbitrary floor: libsqlite3-sys's build script uses the
+      # `cfg_select!` std macro, stabilized between 1.94 and 1.95 -
+      # confirmed directly by bisecting rustup toolchains against it,
+      # since anything older than 1.95 can't compile this dependency tree
+      # at all regardless of what this project's own code needs.
       - name: Install pinned MSRV toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.88"
+          toolchain: "1.95"
 
       - uses: Swatinem/rust-cache@v2
 

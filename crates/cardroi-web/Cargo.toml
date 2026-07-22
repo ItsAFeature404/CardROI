@@ -2,7 +2,7 @@
 name = "cardroi-web"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95"
 authors = ["CardROI Contributors"]
 description = "Browser-based (Dioxus/WASM) build of CardROI (Phase 3.5) - not published, not part of the CLI's MSRV/versioning promises"
 license = "MIT"
