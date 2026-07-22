@@ -419,10 +419,29 @@ fn HoldingDetailBody(
             // same component instance across different holdings when
             // navigating holding-to-holding, leaking one holding's
             // What-If/Mark-Lost form state into another's.
-            WhatIfForm { key: "{holding_id}", holding_id }
+            //
+            // What-If and the actual means to act on it sit together
+            // deliberately - the natural next thought after reflecting on
+            // this ownership is "should I sell," and the answer shouldn't
+            // require leaving the page to act on.
+            div { class: "flex flex-col gap-4 items-start",
+                WhatIfForm { key: "{holding_id}", holding_id }
+                if detail.status == HoldingStatus::Owned {
+                    Link {
+                        to: crate::routes::Route::SellForHoldingRoute { holding_id },
+                        class: "text-gold text-sm no-underline",
+                        "Ready? Sell this holding \u{2192}"
+                    }
+                }
+            }
 
+            // Set apart with the same "distinct, weightier zone" treatment
+            // as the danger zone below - a real turn in this ownership's
+            // story, not a decision made in the same register as What-If.
             if detail.status == HoldingStatus::Owned {
-                MarkLostForm { key: "{holding_id}", holding_id, on_changed }
+                div { class: "pt-6 border-t border-border",
+                    MarkLostForm { key: "{holding_id}", holding_id, on_changed }
+                }
             }
 
             DeleteHoldingSection {
