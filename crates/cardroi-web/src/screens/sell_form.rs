@@ -9,7 +9,7 @@ use cardroi::models::{Money, NewTransaction, Transaction, TransactionType};
 use dioxus::prelude::*;
 
 use crate::components::form_field::FormField;
-use crate::components::holding_picker::{HoldingOption, HoldingPicker};
+use crate::components::holding_picker::{HoldingOption, HoldingPicker, load_single_holding_option};
 use crate::screens::format::money;
 use crate::web_bridge::WebBridge;
 
@@ -77,11 +77,35 @@ pub(crate) fn submit_sale(
 }
 
 #[component]
-pub fn SellForm() -> Element {
+pub fn SellForm(#[props(default)] holding_id: Option<i64>) -> Element {
     use cardroi::models::HoldingStatus;
 
     let bridge = use_context::<WebBridge>();
-    let selected = use_signal(|| None::<HoldingOption>);
+    let mut selected = use_signal(|| None::<HoldingOption>);
+
+    // Reached from a specific holding's own detail page - that holding is
+    // already in view, so pre-select it instead of reopening the same
+    // "which card?" search the collector just came from. Same pattern as
+    // `CompForm`'s identical pre-select block.
+    use_effect({
+        let bridge = bridge.clone();
+        move || {
+            let Some(id) = holding_id else { return };
+            if selected.peek().is_some() {
+                return;
+            }
+            let bridge = bridge.clone();
+            spawn(async move {
+                if let Ok(option) = bridge
+                    .run(move |repo| load_single_holding_option(id, repo))
+                    .await
+                {
+                    selected.set(Some(option));
+                }
+            });
+        }
+    });
+
     let price_input = use_signal(String::new);
     let fees_input = use_signal(String::new);
     let shipping_input = use_signal(String::new);

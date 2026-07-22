@@ -41,6 +41,12 @@ pub enum Route {
     BuyRoute {},
     #[route("/sell", SellForm)]
     SellRoute {},
+    // Reached from a specific holding's own detail page - pre-selects that
+    // holding in `SellForm` instead of dropping into a bare picker that
+    // would force re-searching for the same card. Same reasoning as
+    // `CompForHoldingRoute` below.
+    #[route("/sell/:holding_id", SellFormForHolding)]
+    SellForHoldingRoute { holding_id: i64 },
     #[route("/comp", CompForm)]
     CompRoute {},
     // Reached from a specific holding's own detail page - pre-selects that
@@ -48,6 +54,13 @@ pub enum Route {
     // would force re-searching for the same card.
     #[route("/comp/:holding_id", CompFormForHolding)]
     CompForHoldingRoute { holding_id: i64 },
+}
+
+#[component]
+fn SellFormForHolding(holding_id: i64) -> Element {
+    rsx! {
+        SellForm { holding_id: Some(holding_id) }
+    }
 }
 
 #[component]
