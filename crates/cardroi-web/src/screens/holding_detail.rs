@@ -27,13 +27,170 @@ use cardroi::db::repository::Repository;
 use cardroi::error::Result as CardRoiResult;
 use cardroi::models::{
     Appraisal, Holding, HoldingEdit, HoldingStatus, Money, Transaction, TransactionEdit,
+    TransactionType,
 };
+use chrono::{NaiveDate, Utc};
 use dioxus::prelude::*;
 
 use crate::components::form_field::FormField;
 use crate::web_bridge::WebBridge;
 
 use super::format::{date, money, parse_date, percent};
+
+/// One entry in a holding's ownership timeline - built entirely from data
+/// already recorded (a transaction or a comp), never inferred. Comp
+/// entries carry the *previous* comp's value so the render layer can
+/// show "revised from X" without a second pass over `appraisals`.
+#[derive(Clone, Debug, PartialEq)]
+enum TimelineEntry {
+    Acquisition {
+        date: NaiveDate,
+        total: Money,
+        notes: Option<String>,
+    },
+    Comp {
+        date: NaiveDate,
+        value: Money,
+        source: Option<String>,
+        notes: Option<String>,
+        revised_from: Option<Money>,
+    },
+    Adjustment {
+        date: NaiveDate,
+        total: Money,
+        notes: Option<String>,
+    },
+    Sold {
+        date: NaiveDate,
+        total: Money,
+        notes: Option<String>,
+    },
+    /// Covers both Lost and Damaged - the transaction itself doesn't
+    /// distinguish them (only `Holding.status` does, checked once at
+    /// render time), and a holding can only have one such entry ever,
+    /// since it stops being `Owned` the moment this happens.
+    LostOrDamaged {
+        date: NaiveDate,
+        residual_value: Money,
+        insurance_recovery: Money,
+        cause: Option<String>,
+        notes: Option<String>,
+    },
+}
+
+/// Merges `transactions` and `appraisals` (both already sorted ascending
+/// by date - see `Repository::list_transactions_for_holding`/
+/// `list_appraisals_for_holding`) into one chronological timeline. No
+/// new queries - both lists are already fetched by `load_holding_detail`
+/// for other reasons.
+fn build_timeline(transactions: &[Transaction], appraisals: &[Appraisal]) -> Vec<TimelineEntry> {
+    let mut entries: Vec<(NaiveDate, TimelineEntry)> =
+        Vec::with_capacity(transactions.len() + appraisals.len());
+
+    for txn in transactions {
+        let entry = match txn.transaction_type {
+            TransactionType::Acquisition => TimelineEntry::Acquisition {
+                date: txn.transaction_date,
+                total: txn.total,
+                notes: txn.notes.clone(),
+            },
+            TransactionType::Adjustment => TimelineEntry::Adjustment {
+                date: txn.transaction_date,
+                total: txn.total,
+                notes: txn.notes.clone(),
+            },
+            // `residual_value`/`insurance_recovery`/`loss_cause` are only
+            // ever populated on the Disposition transaction `record_loss`
+            // creates - `record_sale` never sets any of them - so their
+            // presence alone distinguishes a loss from a sale, no need to
+            // consult `Holding.status` here.
+            TransactionType::Disposition
+                if txn.residual_value.is_some()
+                    || txn.insurance_recovery.is_some()
+                    || txn.loss_cause.is_some() =>
+            {
+                TimelineEntry::LostOrDamaged {
+                    date: txn.transaction_date,
+                    residual_value: txn.residual_value.unwrap_or(Money::ZERO),
+                    insurance_recovery: txn.insurance_recovery.unwrap_or(Money::ZERO),
+                    cause: txn.loss_cause.clone(),
+                    notes: txn.notes.clone(),
+                }
+            }
+            TransactionType::Disposition => TimelineEntry::Sold {
+                date: txn.transaction_date,
+                total: txn.total,
+                notes: txn.notes.clone(),
+            },
+        };
+        entries.push((txn.transaction_date, entry));
+    }
+
+    for (i, appraisal) in appraisals.iter().enumerate() {
+        let revised_from = (i > 0).then(|| appraisals[i - 1].appraised_value);
+        entries.push((
+            appraisal.appraised_date,
+            TimelineEntry::Comp {
+                date: appraisal.appraised_date,
+                value: appraisal.appraised_value,
+                source: appraisal.source.clone(),
+                notes: appraisal.notes.clone(),
+                revised_from,
+            },
+        ));
+    }
+
+    // `sort_by_key` is a stable sort - transactions were pushed before
+    // appraisals above, so a same-date transaction (e.g. the acquisition)
+    // still renders before a same-date comp, which is the right default
+    // (you buy it, then maybe price it, not the other way around).
+    entries.sort_by_key(|(date, _)| *date);
+    entries.into_iter().map(|(_, entry)| entry).collect()
+}
+
+/// Days owned so far (still owned) or days the ownership lasted
+/// (concluded) - `None` only if `acquired_date` was never set, which
+/// shouldn't happen in practice but isn't guaranteed by the type.
+fn ownership_duration_days(holding: &Holding, today: NaiveDate) -> Option<i64> {
+    let acquired = holding.acquired_date?;
+    let end = holding.disposed_date.unwrap_or(today);
+    Some((end - acquired).num_days())
+}
+
+/// "3 years, 4 months" / "5 months" / "12 days" - deliberately coarse
+/// (days become months past 60, months become years past 365) since a
+/// collector reads "three years" faster than "1,186 days." The years
+/// threshold matters: past a year, "13 months" reads worse than "1
+/// year, 1 month" - caught by a test expecting the latter at 400 days.
+///
+/// `#[allow(dead_code)]`: wired into rendering in the next milestone,
+/// only exercised by tests until then.
+#[allow(dead_code)]
+fn duration_phrase(days: i64) -> String {
+    if days < 60 {
+        return match days {
+            0 => "less than a day".to_string(),
+            1 => "1 day".to_string(),
+            n => format!("{n} days"),
+        };
+    }
+    if days < 365 {
+        return match days / 30 {
+            1 => "1 month".to_string(),
+            n => format!("{n} months"),
+        };
+    }
+    let years = days / 365;
+    let year_part = match years {
+        1 => "1 year".to_string(),
+        n => format!("{n} years"),
+    };
+    match (days % 365) / 30 {
+        0 => year_part,
+        1 => format!("{year_part}, 1 month"),
+        n => format!("{year_part}, {n} months"),
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 struct HoldingDetailData {
@@ -42,6 +199,11 @@ struct HoldingDetailData {
     set_name: String,
     status: HoldingStatus,
     pnl: HoldingPnl,
+    timeline: Vec<TimelineEntry>,
+    ownership_duration_days: Option<i64>,
+    // Temporary: the current renderer still reads these two directly.
+    // Removed once the merged timeline above replaces the old separate
+    // Transaction history / Comp history sections (next milestone).
     transactions: Vec<Transaction>,
     appraisals: Vec<Appraisal>,
 }
@@ -53,13 +215,17 @@ fn load_holding_detail(holding_id: i64, repo: &Repository) -> CardRoiResult<Hold
     let pnl = roi::holding_pnl(repo, holding_id)?;
     let transactions = repo.list_transactions_for_holding(holding_id)?;
     let appraisals = repo.list_appraisals_for_holding(holding_id)?;
+    let timeline = build_timeline(&transactions, &appraisals);
+    let ownership_duration_days = ownership_duration_days(&holding, Utc::now().date_naive());
 
     Ok(HoldingDetailData {
         card_name: card.display_name(),
         set_name: set.name,
         status: holding.status,
+        ownership_duration_days,
         holding,
         pnl,
+        timeline,
         transactions,
         appraisals,
     })
@@ -965,5 +1131,169 @@ mod tests {
         let pnl = roi::holding_pnl(&repo, holding_id).unwrap();
         // proceeds 150.00 (50 residual + 100 insurance) - 500.00 cost basis
         assert_eq!(pnl.realized_pnl, Some(Money::from_str("-350.00").unwrap()));
+    }
+
+    fn test_date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    fn acquisition_txn(date: NaiveDate, total: &str, notes: Option<&str>) -> Transaction {
+        Transaction {
+            id: 1,
+            holding_id: 1,
+            transaction_type: TransactionType::Acquisition,
+            transaction_date: date,
+            price: Money::from_str(total).unwrap(),
+            fees: Money::ZERO,
+            shipping: Money::ZERO,
+            tax: Money::ZERO,
+            other_cost: Money::ZERO,
+            total: Money::from_str(total).unwrap(),
+            currency: "USD".to_string(),
+            counterparty: None,
+            platform: None,
+            external_ref: None,
+            notes: notes.map(str::to_string),
+            residual_value: None,
+            insurance_recovery: None,
+            loss_cause: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    fn sale_txn(date: NaiveDate, total: &str) -> Transaction {
+        Transaction {
+            transaction_type: TransactionType::Disposition,
+            ..acquisition_txn(date, total, None)
+        }
+    }
+
+    fn loss_txn(date: NaiveDate, residual: &str, cause: &str) -> Transaction {
+        Transaction {
+            transaction_type: TransactionType::Disposition,
+            residual_value: Some(Money::from_str(residual).unwrap()),
+            insurance_recovery: Some(Money::ZERO),
+            loss_cause: Some(cause.to_string()),
+            ..acquisition_txn(date, "0.00", None)
+        }
+    }
+
+    fn comp(date: NaiveDate, value: &str) -> Appraisal {
+        Appraisal {
+            id: 1,
+            holding_id: 1,
+            appraised_value: Money::from_str(value).unwrap(),
+            appraised_date: date,
+            source: None,
+            notes: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn build_timeline_interleaves_transactions_and_comps_chronologically() {
+        let transactions = vec![acquisition_txn(
+            test_date(2026, 1, 1),
+            "500.00",
+            Some("found at a show"),
+        )];
+        let appraisals = vec![
+            comp(test_date(2026, 3, 1), "600.00"),
+            comp(test_date(2026, 6, 1), "900.00"),
+        ];
+
+        let timeline = build_timeline(&transactions, &appraisals);
+
+        assert_eq!(timeline.len(), 3);
+        assert!(
+            matches!(&timeline[0], TimelineEntry::Acquisition { notes, .. } if notes.as_deref() == Some("found at a show"))
+        );
+        match &timeline[1] {
+            TimelineEntry::Comp {
+                value,
+                revised_from,
+                ..
+            } => {
+                assert_eq!(*value, Money::from_str("600.00").unwrap());
+                assert_eq!(*revised_from, None, "the first comp revises nothing");
+            }
+            other => panic!("expected the first comp, got {other:?}"),
+        }
+        match &timeline[2] {
+            TimelineEntry::Comp {
+                value,
+                revised_from,
+                ..
+            } => {
+                assert_eq!(*value, Money::from_str("900.00").unwrap());
+                assert_eq!(*revised_from, Some(Money::from_str("600.00").unwrap()));
+            }
+            other => panic!("expected the second comp, got {other:?}"),
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn build_timeline_distinguishes_a_sale_from_a_loss_by_transaction_fields_alone() {
+        let sold = vec![sale_txn(test_date(2026, 6, 1), "800.00")];
+        let timeline = build_timeline(&sold, &[]);
+        assert!(matches!(timeline[0], TimelineEntry::Sold { .. }));
+
+        let lost = vec![loss_txn(test_date(2026, 6, 1), "50.00", "water damage")];
+        let timeline = build_timeline(&lost, &[]);
+        match &timeline[0] {
+            TimelineEntry::LostOrDamaged {
+                residual_value,
+                cause,
+                ..
+            } => {
+                assert_eq!(*residual_value, Money::from_str("50.00").unwrap());
+                assert_eq!(cause.as_deref(), Some("water damage"));
+            }
+            other => panic!("expected a loss entry, got {other:?}"),
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn ownership_duration_uses_disposed_date_when_concluded_else_today() {
+        let mut holding = Holding {
+            id: 1,
+            card_id: 1,
+            serial_number: None,
+            grade: None,
+            grading_company: None,
+            cert_number: None,
+            status: HoldingStatus::Owned,
+            acquired_date: Some(test_date(2026, 1, 1)),
+            disposed_date: None,
+            notes: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        // Still owned: measured against "today."
+        assert_eq!(
+            ownership_duration_days(&holding, test_date(2026, 1, 11)),
+            Some(10)
+        );
+
+        // Concluded: measured against disposed_date, not today, even if
+        // "today" is much later.
+        holding.status = HoldingStatus::Sold;
+        holding.disposed_date = Some(test_date(2026, 1, 6));
+        assert_eq!(
+            ownership_duration_days(&holding, test_date(2026, 12, 31)),
+            Some(5)
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn duration_phrase_is_coarse_and_reads_naturally() {
+        assert_eq!(duration_phrase(0), "less than a day");
+        assert_eq!(duration_phrase(1), "1 day");
+        assert_eq!(duration_phrase(4), "4 days");
+        assert_eq!(duration_phrase(90), "3 months");
+        assert_eq!(duration_phrase(400), "1 year, 1 month");
+        assert_eq!(duration_phrase(800), "2 years, 2 months");
+        assert_eq!(duration_phrase(730), "2 years");
     }
 }
