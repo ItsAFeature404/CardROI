@@ -1,0 +1,37 @@
+name: Bug report
+description: Something isn't working the way it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: >
+        The exact `cardroi` command/flags you ran, or which screen of the
+        web app and what you clicked/typed.
+    validations:
+      required: true
+  - type: input
+    id: financial-value
+    attributes:
+      label: Hand-computed expected value (if this involves money/ROI/IRR/TWR)
+      description: >
+        If this is about a number CardROI computed, the most useful thing
+        you can include is what the correct answer should have been,
+        worked out independently.
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Your OS/browser, and `cardroi --version` or the commit hash if built from source.
+    validations:
+      required: true

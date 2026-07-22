@@ -2,12 +2,11 @@
 
 [![CI](https://github.com/ItsAFeature404/CardROI/actions/workflows/ci.yml/badge.svg)](https://github.com/ItsAFeature404/CardROI/actions/workflows/ci.yml)
 
-A local-first investment portfolio manager for trading card collectors and
-investors, usable from a phone or computer browser with no install, plus a
-CLI for scripting. Every acquisition cost, sale proceed, fee, shipping
-expense, tax, and comp (a comparable sold listing's price) gets tracked
-down to the cent, so ROI, IRR, TWR, and P&L come out exact — not
-eyeballed off a spreadsheet.
+A local-first investment portfolio manager for trading card collectors —
+open it in a phone or computer browser, no install, no account. Every
+acquisition cost, sale proceed, fee, shipping expense, tax, and comp (a
+comparable sold listing's price) gets tracked down to the cent, so ROI,
+IRR, TWR, and P&L come out exact — not eyeballed off a spreadsheet.
 
 **Not a scanner or market-price app.** CardROI never fetches, scrapes, or
 estimates a card's market value, and never phones home. Every number in a
@@ -17,21 +16,17 @@ or a value you typed in yourself after pricing a card against comps
 everything else. A comp is always labeled as a user-supplied value as of
 a specific date, never presented as a live price.
 
-**Local-first, genuinely.** The web app runs the real database and
-analytics engine client-side, in your own browser — your collection lives
-in that browser's own storage, not on a server anywhere. The CLI stores
-everything in one portable SQLite file you control directly. Either way,
-your data never leaves your device unless you explicitly export it.
+**Local-first, genuinely.** The app runs the real database and analytics
+engine client-side, in your own browser — your collection lives in that
+browser's own storage, not on a server anywhere. Your data never leaves
+your device unless you explicitly export it.
 
 ## Table of contents
 
 - [Features](#features)
+- [The app](#the-app)
 - [Precision, trust & the audit trail](#precision-trust--the-audit-trail)
-- [The web app](#the-web-app)
-- [Install / Build the CLI](#install--build-the-cli)
-- [Configuration](#configuration)
-- [Quick start](#quick-start)
-- [Command reference](#command-reference)
+- [The CLI](#the-cli)
 - [Development](#development)
 - [Contributing](#contributing)
 - [Security](#security)
@@ -39,6 +34,24 @@ your data never leaves your device unless you explicitly export it.
 - [License](#license)
 
 ## Features
+
+**The app**
+- Runs entirely in your browser ([Dioxus](https://dioxuslabs.com/), web/
+  WASM target) via real SQLite compiled to WebAssembly, persisted to
+  your browser's own storage — no server, no account, no cloud. See
+  [The app](#the-app) below for exactly how that works and what it means
+  for your data.
+- Responsive from the ground up: a sidebar on desktop, a bottom nav plus
+  a floating quick-action button on phone — not a desktop layout
+  squeezed down.
+- Dashboard, a paginated/groupable portfolio table (by set, player, or
+  sport), per-holding drill-down (full transaction and comp history,
+  What-If sale simulation, Mark Lost/Damaged, inline edit, and a
+  danger-zone delete), Buy/Sell/Comp entry forms, an advanced performance
+  view (IRR/TWR behind a "Show advanced" toggle) and a risk/allocation
+  view (diversification score, concentration bar, allocation donut).
+- See [Status](#status) for exactly what's built versus still in
+  progress.
 
 **Catalog & ledger**
 - `Set → Card → Holding → Transaction` data model: cards are catalog
@@ -48,23 +61,20 @@ your data never leaves your device unless you explicitly export it.
   cost-basis adjustments)
 - Full CRUD on sets, cards, and holdings, with referential-integrity
   guards (e.g. a card can't be deleted while holdings still reference it)
-- `buy`/`sell` with price, fees, shipping, tax, and other costs tracked
-  separately; `--quantity N` fans one `buy` out into N independently
-  sellable holdings
-- Correct a data-entry mistake after the fact: `holding edit`/
-  `transaction edit` fix a typo (serial, grade, price, date, ...) without
-  disturbing anything else; `holding delete --with-transactions`
-  permanently removes a mistaken or test holding and its whole history —
-  a deliberate, explicit override of the normal safeguard that otherwise
-  keeps ledger history from ever being silently lost
+- Buy/sell with price, fees, shipping, tax, and other costs tracked
+  separately
+- Correct a data-entry mistake after the fact: edit a holding or a
+  transaction (serial, grade, price, date, ...) without disturbing
+  anything else; deleting a holding with transactions on it requires an
+  explicit, separate confirmation — a deliberate override of the normal
+  safeguard that otherwise keeps ledger history from ever being silently
+  lost
 - Grading support (grade, grading company, cert number), serial numbers,
   print runs, parallels, variants, rookie/autograph/relic flags
-- Loss/damage tracking (`mark-lost`/`mark-damaged`) records a real
-  realized loss — optional residual/salvage value and insurance recovery,
-  tracked separately — not just a status flip; guarded so a sold holding's
-  status and realized P&L can never be silently overwritten
-- Bulk import from CSV or JSON, with a `--checklist` mode for
-  catalog-only pre-loading before you own anything
+- Loss/damage tracking (Mark Lost/Damaged) records a real realized loss —
+  optional residual/salvage value and insurance recovery, tracked
+  separately — not just a status flip; guarded so a sold holding's status
+  and realized P&L can never be silently overwritten
 - Every mutation lives in the transaction ledger — a holding's full
   history is reconstructable from it alone
 
@@ -98,84 +108,25 @@ your data never leaves your device unless you explicitly export it.
   against a currently-owned holding's real cost basis — read-only, never
   writes anything, and only ever operates on holdings you still own
 - Every assumption used (price, source, date, fees/shipping/tax/other
-  cost) is always printed; `--format json` output uses field names
-  distinct from `roi`'s real P&L so it can never be mistaken for a real
-  number, whether read by a human or a script
-
-**Reporting**
-- `table`, `csv`, and `json` output; write to a file or stdout
-
-**Web app**
-- Runs entirely in your browser ([Dioxus](https://dioxuslabs.com/), web/
-  WASM target) — the exact same `Repository`/`analytics` engine the CLI
-  uses, genuinely client-side via real SQLite compiled to WebAssembly,
-  persisted to your browser's own storage. No server, no account, no
-  cloud — see [The web app](#the-web-app) below for exactly how that
-  works and what it means for your data.
-- Responsive from the ground up: a sidebar on desktop, a bottom nav plus
-  a floating quick-action button on phone — not a desktop layout
-  squeezed down.
-- Dashboard, a paginated/groupable portfolio table (by set, player, or
-  sport), per-holding drill-down (full transaction and comp history,
-  What-If sale simulation, Mark Lost/Damaged, inline edit, and a
-  danger-zone delete), Buy/Sell/Comp entry forms, an advanced performance
-  view (IRR/TWR behind a "Show advanced" toggle) and a risk/allocation
-  view (diversification score, concentration bar, allocation donut).
-- See [Status](#status) for exactly what's built versus still in
-  progress, and [The web app](#the-web-app) for how to run it yourself.
+  cost) is always shown, never left implicit
 
 **Precision & platform**
 - Money is exact integer cents end to end — never a float — with
   overflow checks on; the only narrow exception is the IRR/TWR rate
   itself, which is inherently the root of an equation found by numerical
   approximation (documented at the conversion boundary in the code)
-- The CLI stores everything in one portable `.db` file; the web app
-  stores everything in your browser's own local storage. Neither needs
-  an account or a cloud service to function.
-- CLI is cross-platform (Linux, macOS, Windows) — CI-verified on all
-  three for every commit, not just assumed
+- Everything lives in your browser's own local storage. No account, no
+  cloud service, required to function.
 
-## Precision, trust & the audit trail
+**Also included: a CLI**, for scripting/bulk automation/testing — see
+[The CLI](#the-cli). Most collectors should just use the app above.
 
-Four things this project will never compromise on:
+## The app
 
-- **Money is never a float.** Every amount is parsed to exact integer
-  cents and rejects anything with more than 2 decimal places rather than
-  silently rounding. Accepts a plain number (`500.00`), an optional
-  leading `$`, and optional standard thousands grouping (`1,234.56`); a
-  comma is **never** interpreted as a decimal point (`10,00` is rejected
-  as ambiguous, not silently read as `1000.00`, since that's how many
-  locales write ten). Dates are always `YYYY-MM-DD`.
-- **Every mutation lives in the transaction ledger.** A holding's full
-  cost basis, disposition, and loss history is reconstructable from its
-  transactions alone — nothing about a holding's financial history is
-  ever stored only as a derived, overwritable field. The one deliberate
-  exception is `holding delete --with-transactions`, an explicit,
-  irreversible action you have to opt into by name — it exists to undo a
-  genuine mistake, not to quietly erase history by accident.
-- **Nothing is ever estimated as if it were real.** A comp is
-  always labeled as a user-supplied value as of a specific date. A
-  what-if result is always prefixed `HYPOTHETICAL` and uses field names
-  distinct from real P&L, in both table and JSON output, so a script
-  can't accidentally treat one as the other.
-- **JSON percentage fields are raw ratios, not pre-scaled percentages.**
-  `roi_pct`, `hypothetical_roi_pct`, and similar `*_pct` fields in
-  `--format json` output serialize as e.g. `"0.50"` for 50%, matching
-  what the table view shows as `50.00%`. JSON is for further computation,
-  not display — if you're scripting against it, expect ratios.
-
-**This is not financial, tax, or legal advice**, and CardROI does not
-provide any — it's a ledger and calculator for numbers you supply
-yourself. See the [MIT license](LICENSE) for the full "as-is, no
-warranty" terms.
-
-## The web app
-
-`crates/cardroi-web` is the primary way most people should use CardROI —
-open it in a phone or desktop browser, no install. It depends on the root
-`cardroi` crate as a library, so there's no second data or validation
-layer to keep in sync with the CLI: the same `Repository`/`analytics`
-code runs in both places.
+`crates/cardroi-web` is CardROI — open it in a phone or desktop browser,
+no install. It depends on the root `cardroi` crate as a library for its
+data/analytics logic, so there's no second, parallel validation layer to
+keep in sync.
 
 **Where your data actually lives:** the app installs a real SQLite
 database, compiled to WebAssembly, running inside your browser tab. Its
@@ -215,7 +166,47 @@ utility class in a `.rs` file, recompile by hand from `crates/cardroi-web/`:
 ./node_modules/.bin/tailwindcss -i assets/tailwind.css -o assets/tailwind.generated.css
 ```
 
-## Install / Build the CLI
+There's no public, deployed version yet — see [Status](#status).
+
+## Precision, trust & the audit trail
+
+Four things this project will never compromise on:
+
+- **Money is never a float.** Every amount is parsed to exact integer
+  cents and rejects anything with more than 2 decimal places rather than
+  silently rounding. Accepts a plain number (`500.00`), an optional
+  leading `$`, and optional standard thousands grouping (`1,234.56`); a
+  comma is **never** interpreted as a decimal point (`10,00` is rejected
+  as ambiguous, not silently read as `1000.00`, since that's how many
+  locales write ten).
+- **Every mutation lives in the transaction ledger.** A holding's full
+  cost basis, disposition, and loss history is reconstructable from its
+  transactions alone — nothing about a holding's financial history is
+  ever stored only as a derived, overwritable field. The one deliberate
+  exception is a full holding delete including its transactions, an
+  explicit, irreversible action you have to opt into by name — it exists
+  to undo a genuine mistake, not to quietly erase history by accident.
+- **Nothing is ever estimated as if it were real.** A comp is
+  always labeled as a user-supplied value as of a specific date. A
+  what-if result is always clearly marked hypothetical and never
+  presented alongside real P&L in a way that could be confused for it.
+- **JSON percentage fields (CLI output) are raw ratios, not pre-scaled
+  percentages.** `roi_pct` and similar fields serialize as e.g. `"0.50"`
+  for 50%. JSON is for further computation, not display.
+
+**This is not financial, tax, or legal advice**, and CardROI does not
+provide any — it's a ledger and calculator for numbers you supply
+yourself. See the [MIT license](LICENSE) for the full "as-is, no
+warranty" terms.
+
+## The CLI
+
+A command-line interface over the exact same engine the web app uses —
+useful for scripting, bulk automation, or testing, but not what most
+collectors should reach for day to day. Everything in
+[Features](#features) above is available from it.
+
+### Install / build
 
 Requires Rust 1.88+ (2024 edition). On Windows, a C toolchain (MSVC Build
 Tools or MinGW-w64) is needed to compile the bundled SQLite.
@@ -225,30 +216,17 @@ git clone https://github.com/ItsAFeature404/CardROI.git
 cd CardROI
 cargo build --release
 # binary at target/release/cardroi
+cargo install --path .   # to run `cardroi` from anywhere (a snapshot -
+                          # re-run after pulling new commits to update it)
 ```
 
-To run `cardroi` from anywhere as a normal command (not just inside this
-repo), install it to `~/.cargo/bin` (already on `PATH` if you have Rust set
-up via rustup):
+### Configuration
 
-```bash
-cargo install --path .
-```
+Stores everything in one SQLite file, `cardroi.db` by default in the
+current directory. Override with the global `--db <path>` flag or the
+`CARDROI_DB` environment variable (`--db` wins if both are set).
 
-This installs a snapshot — it does **not** auto-update as the code changes.
-Re-run `cargo install --path .` whenever you want your global `cardroi` to
-pick up new commits.
-
-## Configuration
-
-CardROI's CLI stores everything in one SQLite file, `cardroi.db` by
-default in the current directory. Override the path with the global
-`--db <path>` flag or the `CARDROI_DB` environment variable (`--db` wins
-if both are set). There is no other configuration. The web app has no
-equivalent file path at all — see [The web app](#the-web-app) for where
-its data actually lives.
-
-## Quick start
+### Quick start
 
 ```bash
 # 1. Catalog: define the set and the card
@@ -277,9 +255,10 @@ Run `cardroi <command> --help` or `cardroi <command> <subcommand> --help`
 for the full, always-current flag reference — everything below is a
 summary, not a substitute for it.
 
-## Command reference
+### Command reference
 
-### Catalog: sets and cards
+<details>
+<summary>Catalog: sets and cards</summary>
 
 ```bash
 cardroi set add --name "2023 Topps Chrome" --sport Basketball --year 2023 \
@@ -298,8 +277,10 @@ cardroi card delete <id>       # fails if any holdings still reference it
 
 A set is unique on `(name, sport, year)`; a card is unique within a set on
 `(number, variant, parallel)`.
+</details>
 
-### Holdings, buy, sell, edit, delete
+<details>
+<summary>Holdings, buy, sell, edit, delete</summary>
 
 ```bash
 # buy/sell cover the common path; holding add/delete are for direct control
@@ -338,23 +319,23 @@ status can't be overwritten. Selling an already-sold holding is rejected.
 transaction), not just a status change. `--residual-value` is any
 salvage/market value the card retains (defaults to 0.00, a total loss);
 `--insurance-recovery` is reimbursement received, tracked separately since
-the two are legally distinct for tax purposes (both are subtracted from
-cost basis, but from different sources — mirroring how the IRS and
-collectibles insurers actually treat a damaged/lost item). Neither is ever
-estimated for you — damage discount varies enormously by rarity and damage
-type, so you provide the number.
+the two are legally distinct for tax purposes. Neither is ever estimated
+for you — damage discount varies enormously by rarity and damage type, so
+you provide the number.
 
 `holding edit`/`transaction edit` only change fields you actually pass a
 flag for — omit a flag to leave that field as-is, or pass an empty string
 to clear an optional text field. Neither can change a holding's card,
 status, or a transaction's type — those stay governed by `sell`/
-`mark-lost`/`mark-damaged`, so an edit can never desync a status from its
-real disposition. `holding delete --with-transactions` is the one
-sanctioned way to fully remove a holding that already has transactions on
-it (every holding does, the moment it's bought) — a real, permanent loss
-of history, meant for a genuine mistake or test entry, not routine use.
+`mark-lost`/`mark-damaged`. `holding delete --with-transactions` is the
+one sanctioned way to fully remove a holding that already has
+transactions on it (every holding does, the moment it's bought) — a real,
+permanent loss of history, meant for a genuine mistake or test entry, not
+routine use.
+</details>
 
-### Comps
+<details>
+<summary>Comps</summary>
 
 ```bash
 cardroi comp add --holding-id 1 --value 900.00 --date 2026-06-01 \
@@ -369,8 +350,10 @@ not a formal, third-party appraisal. Multiple comps per holding are
 expected — log a new one whenever you re-price it. Everything downstream
 (`roi`, `irr`, `twr`, `report`) uses the most recent one by date and
 always labels it as user-supplied.
+</details>
 
-### Analytics
+<details>
+<summary>Analytics</summary>
 
 ```bash
 cardroi roi                            # whole portfolio
@@ -390,9 +373,11 @@ cardroi twr                            # portfolio, currently-owned holdings
 `roi`/`report` never claim an unrealized gain/loss for a holding with no
 comp on record — cost basis only, exactly as if no comps existed.
 `--format json`'s `roi_pct` is a raw ratio (`"0.50"`), not a pre-scaled
-percentage — see [Precision, trust & the audit trail](#precision-trust--the-audit-trail).
+percentage.
+</details>
 
-### What-if
+<details>
+<summary>What-if</summary>
 
 ```bash
 cardroi whatif --holding-id 1 --price 800.00 --date 2026-06-01
@@ -403,13 +388,12 @@ cardroi whatif --holding-id 1 --price 800.00 --format json
 
 Exactly one of `--price`/`--at-comp` is required. Only valid on a
 currently-owned holding (an already-sold one has a real answer via `roi`).
-Nothing is ever written — every assumption used (price, its source, date,
-and all four cost fields, even when left at their `0.00` default) is
-printed alongside the result, and the output is prefixed `HYPOTHETICAL`
-so it can never be confused with a real number. As with `roi`, JSON's
-`hypothetical_roi_pct` is a raw ratio, not a percentage.
+Nothing is ever written — every assumption used is printed alongside the
+result, and the output is prefixed `HYPOTHETICAL`.
+</details>
 
-### Bulk import
+<details>
+<summary>Bulk import</summary>
 
 ```bash
 cardroi import --file collection.csv
@@ -420,10 +404,8 @@ cardroi import --file checklist.csv --checklist   # catalog only, no cost
 Format is inferred from the file extension, or set explicitly with
 `--format csv|json`. Every row: finds-or-creates the set and card (deduped
 by their natural keys above) and — unless `--checklist` — always creates a
-new holding and its founding transaction, even on a re-import (importing
-the same file twice means you bought it twice). The whole import is one
-atomic operation: any invalid row rolls back everything, not just that
-row.
+new holding and its founding transaction, even on a re-import. The whole
+import is one atomic operation: any invalid row rolls back everything.
 
 Columns (CSV header row or JSON object keys — see
 [`tests/fixtures/import_sample.csv`](tests/fixtures/import_sample.csv) and
@@ -444,8 +426,10 @@ examples):
 | `price` | **yes, unless `--checklist`** | ignored/absent in checklist mode |
 | `fees`, `shipping`, `tax`, `other_cost` | no | default `0.00` |
 | `counterparty`, `platform`, `external_ref`, `notes` | no | |
+</details>
 
-### Reports
+<details>
+<summary>Reports</summary>
 
 ```bash
 cardroi report                              # table, stdout
@@ -455,8 +439,8 @@ cardroi report --format json
 
 Table/JSON include the portfolio summary, per-card breakdown, allocation
 by card/set, HHI concentration, and attribution by player/sport. CSV is
-the per-card breakdown only (the summary sections don't fit a flat
-per-row schema).
+the per-card breakdown only.
+</details>
 
 ## Development
 
@@ -467,7 +451,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 cargo audit                                          # dependency advisories
 
-# the web app (a separate build target, see "The web app" above)
+# the web app (a separate build target, see "The app" above)
 cargo clippy -p cardroi-web --target wasm32-unknown-unknown --all-targets -- -D warnings
 ```
 
@@ -475,9 +459,9 @@ This project is built following a spec/plan/TDD discipline: every task is
 specced, planned, and test-first before implementation, with every
 financial calculation backed by a hand-computed or independently
 cross-checked reference value — never just "it doesn't panic." CI runs
-the CLI's full suite plus `clippy`/`fmt` checks on Linux, macOS, and
-Windows, and a `wasm32-unknown-unknown` build+clippy check for the web
-app, on every push.
+the full test suite plus `clippy`/`fmt` checks on Linux, macOS, and
+Windows, and a `wasm32-unknown-unknown` build+clippy check for the app,
+on every push.
 
 ## Contributing
 
@@ -489,20 +473,15 @@ hand-computed test value).
 
 ## Security
 
-CardROI's CLI has no network code at all. The web app fetches its own
-code from wherever it's hosted (like any website) but makes no other
-network calls — your data itself never crosses the network. See
+The app fetches its own code from wherever it's hosted (like any
+website) but makes no other network calls — your data itself never
+crosses the network. The CLI has no network code at all. See
 [`SECURITY.md`](SECURITY.md) for the realistic attack surface and how to
 report a vulnerability privately.
 
 ## Status
 
-The engine and CLI are complete: catalog CRUD, buy/sell, edit/delete,
-CSV/JSON import, realized/unrealized P&L, comps, XIRR, time-weighted
-return, portfolio analytics, loss/damage tracking, and what-if scenario
-modeling are all built and tested.
-
-The web app is the primary, actively-developed interface. Built and
+The app is the primary, actively-developed interface. Built and
 cross-checked against the CLI's own output: real SQLite persistence in
 the browser (confirmed surviving a tab reload, full browser close/
 reopen, and a home-screen-installed close/reopen on a real phone), a
@@ -516,9 +495,14 @@ player/sport allocation).
 Not yet built: a Ledger screen and a Settings screen (both still
 placeholders), an in-browser import/export UI, a public deployment (the
 app currently has to be run locally via `dx serve` — see
-[The web app](#the-web-app)), and a Playwright end-to-end test suite.
+[The app](#the-app)), and a Playwright end-to-end test suite.
 Tax/insurance reporting and an HTML/PDF dashboard are planned after that
 but not started.
+
+The engine and CLI underneath it are complete: catalog CRUD, buy/sell,
+edit/delete, CSV/JSON import, realized/unrealized P&L, comps, XIRR,
+time-weighted return, portfolio analytics, loss/damage tracking, and
+what-if scenario modeling are all built and tested.
 
 ## License
 

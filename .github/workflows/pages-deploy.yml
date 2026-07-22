@@ -1,0 +1,81 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deploy at a time; let an in-flight run finish rather than
+# cancel it, since a cancelled Pages deploy can leave the site half-updated.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (wasm32, release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/cardroi-web/package-lock.json
+
+      - name: Install Tailwind
+        working-directory: crates/cardroi-web
+        run: npm ci
+
+      - name: Compile Tailwind CSS
+        working-directory: crates/cardroi-web
+        run: npm run build:css
+
+      - name: Install dioxus-cli
+        run: cargo install dioxus-cli --version 0.7.9 --locked
+
+      # base-path is passed here, not set in Dioxus.toml - baking it into
+      # the config permanently breaks local `dx serve` (dioxus-cli#2285).
+      # Pages serves this repo at /CardROI/, not domain root.
+      - name: Bundle for web
+        run: |
+          dx bundle -p cardroi-web --platform web --release \
+            --base-path CardROI \
+            --out-dir dist
+
+      # GitHub Pages has no server-side rewrite rules, so client-side
+      # routing needs a 404.html fallback that serves the same SPA shell.
+      - name: SPA fallback for client-side routing
+        run: cp dist/public/index.html dist/public/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/public
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

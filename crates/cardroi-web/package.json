@@ -1,0 +1,13 @@
+{
+  "name": "cardroi-web-assets",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Tailwind build tooling for crates/cardroi-web - not published, no runtime JS.",
+  "scripts": {
+    "build:css": "tailwindcss -i assets/tailwind.css -o assets/tailwind.generated.css"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.3.3",
+    "@tailwindcss/cli": "^4.3.3"
+  }
+}

@@ -2,7 +2,8 @@
 
 CardROI is currently a solo-maintained project — there's no formal process,
 no CLA, and no guaranteed review turnaround. That said, issues and pull
-requests are welcome.
+requests are welcome. Everyone participating is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Reporting a bug or requesting a feature
 

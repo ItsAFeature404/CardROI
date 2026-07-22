@@ -1,0 +1,18 @@
+name: Feature request
+description: Suggest something CardROI doesn't do yet
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem this would solve?
+      description: What are you trying to do that isn't possible (or is awkward) today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you want instead?
+      description: A rough idea is fine - this doesn't need to be a full design.
+    validations:
+      required: false
