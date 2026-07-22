@@ -8,6 +8,7 @@
 use dioxus::prelude::*;
 
 mod components;
+mod local_prefs;
 mod routes;
 mod screens;
 mod storage;

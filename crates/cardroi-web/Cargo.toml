@@ -57,3 +57,20 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 # choice for v1 per docs/ideas/cardroi-web.md's "good enough, not
 # bulletproof" requirement.
 sqlite-wasm-vfs = "0.2"
+# `local_prefs`'s browser-localStorage read/write (the collector's
+# display name, and whether they've already been asked for it) - raw
+# web-sys rather than a third-party Dioxus storage crate, since the need
+# is two function calls, not a reactive synced signal. Already in
+# Cargo.lock transitively via dioxus-web; needs a direct line to be
+# importable by name, same reasoning as rusqlite/getrandom above.
+web-sys = { version = "0.3", features = ["Window", "Storage"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+# Lets `cargo test --target wasm32-unknown-unknown` actually execute
+# (not just compile) this crate's tests - a plain `#[test]` binary can't
+# run here at all: the whole cardroi-web binary links wasm-bindgen glue
+# (via dioxus-web/web-sys) that only a JS host can satisfy, confirmed by
+# trying a bare wasm32 runtime (wasmtime) first and watching it fail on
+# `__wbindgen_describe`. `#[wasm_bindgen_test]` + the matching
+# `wasm-bindgen-cli` runner is the real fix, not a plain runtime.
+wasm-bindgen-test = "0.3"

@@ -1,0 +1,18 @@
+# Lets `cargo test --target wasm32-unknown-unknown` actually execute the
+# produced .wasm test binary instead of just compiling it - without this,
+# cargo has no runner configured for this target and silently never runs
+# anything (confirmed directly: `Exec format error` with no config here).
+#
+# A bare wasm32 runtime (wasmtime) does NOT work: this crate's binary
+# links wasm-bindgen glue (via dioxus-web/web-sys) that only a JS host
+# can satisfy - confirmed directly, wasmtime fails to instantiate with
+# `unknown import: __wbindgen_placeholder__::__wbindgen_describe`.
+# `wasm-bindgen-test-runner` (installed via `wasm-bindgen-cli`, version-
+# matched to the `wasm-bindgen` crate version in Cargo.lock) is the real
+# runner - it drives the test via Node (see `wasm_bindgen_test_configure!
+# (run_in_node)` in the test modules that use it), not a browser.
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"
+
+[env]
+WASM_BINDGEN_TEST_ONLY_NODE = "1"

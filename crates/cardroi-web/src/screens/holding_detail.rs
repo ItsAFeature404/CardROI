@@ -861,8 +861,17 @@ mod tests {
 
     use cardroi::db::open_in_memory;
     use cardroi::models::{NewCard, NewHolding, NewSet, NewTransaction};
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     use super::*;
+
+    // This crate only ever builds for wasm32 (see Cargo.toml's dependency
+    // tables), so its tests need a wasm-aware harness - plain #[test]
+    // compiles but can never execute here (confirmed directly: the linked
+    // wasm-bindgen glue needs a JS host, which no bare wasm32 runtime
+    // provides). No `wasm_bindgen_test_configure!` call needed - Node is
+    // the default target, and none of these tests touch the DOM, only
+    // the in-memory repository, so there's no reason to force a browser.
 
     fn repo_with_owned_holding() -> (Repository, i64) {
         let repo = Repository::new(open_in_memory().unwrap());
@@ -900,7 +909,7 @@ mod tests {
     // - the same "run it twice, confirm nothing changed" pattern, exercised
     // against this web-specific wrapper rather than assuming the library
     // function it calls is enough proof this code path is also write-free.
-    #[test]
+    #[wasm_bindgen_test]
     fn running_whatif_twice_never_changes_the_holdings_real_state() {
         let (repo, holding_id) = repo_with_owned_holding();
 
@@ -933,7 +942,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn mark_loss_flips_status_and_matches_repository_record_loss_directly() {
         let (repo, holding_id) = repo_with_owned_holding();
 

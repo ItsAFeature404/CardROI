@@ -80,6 +80,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # `wasm-bindgen-cli`'s version must exactly match the `wasm-bindgen`
+      # crate version Cargo.lock resolves - a mismatch is a hard failure,
+      # not a warning, so this is read from the lockfile rather than
+      # pinned by hand and left to drift out of sync with it.
+      - name: Install wasm-bindgen-cli (version-matched to Cargo.lock)
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | tail -1 | cut -d'"' -f2)
+          cargo install wasm-bindgen-cli --version "$version" --locked
+
       # sqlite-wasm-rs's build script compiles SQLite's C source to
       # wasm32-unknown-unknown, which needs a wasm-capable clang - already
       # present on ubuntu-latest runners.
@@ -88,6 +101,12 @@ jobs:
 
       - name: Build
         run: cargo build -p cardroi-web --target wasm32-unknown-unknown --release
+
+      # Runs via `wasm-bindgen-test-runner` (configured in .cargo/config.toml)
+      # under Node - a bare wasm32 runtime can't execute this crate's tests
+      # at all, since the linked wasm-bindgen glue needs a JS host.
+      - name: Test
+        run: cargo test -p cardroi-web --target wasm32-unknown-unknown
 
   audit:
     name: cargo audit
