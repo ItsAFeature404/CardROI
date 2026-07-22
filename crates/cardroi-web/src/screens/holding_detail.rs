@@ -162,10 +162,6 @@ fn ownership_duration_days(holding: &Holding, today: NaiveDate) -> Option<i64> {
 /// collector reads "three years" faster than "1,186 days." The years
 /// threshold matters: past a year, "13 months" reads worse than "1
 /// year, 1 month" - caught by a test expecting the latter at 400 days.
-///
-/// `#[allow(dead_code)]`: wired into rendering in the next milestone,
-/// only exercised by tests until then.
-#[allow(dead_code)]
 fn duration_phrase(days: i64) -> String {
     if days < 60 {
         return match days {
@@ -268,13 +264,38 @@ fn HoldingDetailBody(
     let mut editing_holding = use_signal(|| false);
     let mut editing_txn = use_signal(|| None::<i64>);
 
+    let notes = detail.holding.notes.as_deref().unwrap_or("").trim();
+
     rsx! {
         div { class: "p-8 flex flex-col gap-8 max-w-4xl",
             div {
                 div { class: "flex justify-between items-start",
                     div {
-                        h1 { class: "text-2xl font-semibold m-0", "{detail.card_name}" }
+                        h1 { class: "text-3xl font-semibold m-0", "{detail.card_name}" }
                         p { class: "text-text-secondary text-sm mt-1 mb-0", "{detail.set_name} - {detail.status.as_str()}" }
+                        div { class: "flex flex-wrap gap-2 mt-3",
+                            if let Some(serial) = &detail.holding.serial_number {
+                                span { class: "px-2 py-0.5 rounded-radius bg-surface-elevated text-text-secondary text-xs font-data", "#{serial}" }
+                            }
+                            if let Some(grade) = &detail.holding.grade {
+                                span { class: "px-2 py-0.5 rounded-radius bg-gold text-canvas text-xs font-semibold",
+                                    if let Some(company) = &detail.holding.grading_company {
+                                        "{company} {grade}"
+                                    } else {
+                                        "{grade}"
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(days) = detail.ownership_duration_days {
+                            p { class: "text-text-tertiary text-sm mt-2 mb-0",
+                                if detail.status == HoldingStatus::Owned {
+                                    "Yours for {duration_phrase(days)}"
+                                } else {
+                                    "Owned for {duration_phrase(days)}"
+                                }
+                            }
+                        }
                     }
                     button {
                         class: "text-gold text-sm bg-transparent border-none cursor-pointer p-0",
@@ -296,6 +317,13 @@ fn HoldingDetailBody(
             }
 
             PnlSummary { pnl: detail.pnl.clone() }
+
+            if !notes.is_empty() {
+                div {
+                    h2 { class: "text-sm font-semibold text-text-secondary uppercase tracking-wide m-0 mb-2", "Current thoughts" }
+                    p { class: "m-0 whitespace-pre-wrap", "{notes}" }
+                }
+            }
 
             div {
                 h2 { class: "text-sm font-semibold text-text-secondary uppercase tracking-wide m-0 mb-3", "Transaction history" }
