@@ -44,11 +44,16 @@ use super::format::{date, money, parse_date, percent};
 #[derive(Clone, Debug, PartialEq)]
 enum TimelineEntry {
     Acquisition {
+        id: i64,
         date: NaiveDate,
         total: Money,
         notes: Option<String>,
     },
+    /// `id` is only used as a stable render key here - comps have no
+    /// edit affordance anywhere in this app today (only adding one is
+    /// supported), not this brief's job to add.
     Comp {
+        id: i64,
         date: NaiveDate,
         value: Money,
         source: Option<String>,
@@ -56,11 +61,13 @@ enum TimelineEntry {
         revised_from: Option<Money>,
     },
     Adjustment {
+        id: i64,
         date: NaiveDate,
         total: Money,
         notes: Option<String>,
     },
     Sold {
+        id: i64,
         date: NaiveDate,
         total: Money,
         notes: Option<String>,
@@ -70,6 +77,7 @@ enum TimelineEntry {
     /// render time), and a holding can only have one such entry ever,
     /// since it stops being `Owned` the moment this happens.
     LostOrDamaged {
+        id: i64,
         date: NaiveDate,
         residual_value: Money,
         insurance_recovery: Money,
@@ -90,11 +98,13 @@ fn build_timeline(transactions: &[Transaction], appraisals: &[Appraisal]) -> Vec
     for txn in transactions {
         let entry = match txn.transaction_type {
             TransactionType::Acquisition => TimelineEntry::Acquisition {
+                id: txn.id,
                 date: txn.transaction_date,
                 total: txn.total,
                 notes: txn.notes.clone(),
             },
             TransactionType::Adjustment => TimelineEntry::Adjustment {
+                id: txn.id,
                 date: txn.transaction_date,
                 total: txn.total,
                 notes: txn.notes.clone(),
@@ -110,6 +120,7 @@ fn build_timeline(transactions: &[Transaction], appraisals: &[Appraisal]) -> Vec
                     || txn.loss_cause.is_some() =>
             {
                 TimelineEntry::LostOrDamaged {
+                    id: txn.id,
                     date: txn.transaction_date,
                     residual_value: txn.residual_value.unwrap_or(Money::ZERO),
                     insurance_recovery: txn.insurance_recovery.unwrap_or(Money::ZERO),
@@ -118,6 +129,7 @@ fn build_timeline(transactions: &[Transaction], appraisals: &[Appraisal]) -> Vec
                 }
             }
             TransactionType::Disposition => TimelineEntry::Sold {
+                id: txn.id,
                 date: txn.transaction_date,
                 total: txn.total,
                 notes: txn.notes.clone(),
@@ -131,6 +143,7 @@ fn build_timeline(transactions: &[Transaction], appraisals: &[Appraisal]) -> Vec
         entries.push((
             appraisal.appraised_date,
             TimelineEntry::Comp {
+                id: appraisal.id,
                 date: appraisal.appraised_date,
                 value: appraisal.appraised_value,
                 source: appraisal.source.clone(),
@@ -188,6 +201,31 @@ fn duration_phrase(days: i64) -> String {
     }
 }
 
+/// A stable, unique key for rendering a mixed-variant list of timeline
+/// entries - `TimelineEntry` itself has no single common `id` field
+/// across variants (comps and transactions are different tables).
+fn timeline_entry_key(entry: &TimelineEntry) -> String {
+    match entry {
+        TimelineEntry::Acquisition { id, .. }
+        | TimelineEntry::Adjustment { id, .. }
+        | TimelineEntry::Sold { id, .. }
+        | TimelineEntry::LostOrDamaged { id, .. } => format!("txn-{id}"),
+        TimelineEntry::Comp { id, .. } => format!("comp-{id}"),
+    }
+}
+
+/// The backing `Transaction.id` for an editable entry, or `None` for a
+/// `Comp` (no edit form exists for one anywhere in this app).
+fn timeline_entry_txn_id(entry: &TimelineEntry) -> Option<i64> {
+    match entry {
+        TimelineEntry::Acquisition { id, .. }
+        | TimelineEntry::Adjustment { id, .. }
+        | TimelineEntry::Sold { id, .. }
+        | TimelineEntry::LostOrDamaged { id, .. } => Some(*id),
+        TimelineEntry::Comp { .. } => None,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct HoldingDetailData {
     holding: Holding,
@@ -197,11 +235,13 @@ struct HoldingDetailData {
     pnl: HoldingPnl,
     timeline: Vec<TimelineEntry>,
     ownership_duration_days: Option<i64>,
-    // Temporary: the current renderer still reads these two directly.
-    // Removed once the merged timeline above replaces the old separate
-    // Transaction history / Comp history sections (next milestone).
+    // Kept (not folded into `timeline`) because `TransactionEditForm`
+    // needs the *full* `Transaction` (fees, shipping, counterparty, ...)
+    // to edit one, and `DeleteHoldingSection` needs the count - the
+    // timeline only carries the narrower fields the read view shows.
+    // `appraisals` has no equivalent need (comps have no edit form
+    // anywhere in this app) and isn't kept.
     transactions: Vec<Transaction>,
-    appraisals: Vec<Appraisal>,
 }
 
 fn load_holding_detail(holding_id: i64, repo: &Repository) -> CardRoiResult<HoldingDetailData> {
@@ -223,7 +263,6 @@ fn load_holding_detail(holding_id: i64, repo: &Repository) -> CardRoiResult<Hold
         pnl,
         timeline,
         transactions,
-        appraisals,
     })
 }
 
@@ -326,65 +365,50 @@ fn HoldingDetailBody(
             }
 
             div {
-                h2 { class: "text-sm font-semibold text-text-secondary uppercase tracking-wide m-0 mb-3", "Transaction history" }
-                if detail.transactions.is_empty() {
-                    p { class: "text-text-secondary m-0", "No transactions recorded." }
-                } else {
-                    div { class: "flex flex-col",
-                        for txn in detail.transactions.iter().cloned() {
-                            if editing_txn() == Some(txn.id) {
-                                TransactionEditForm {
-                                    key: "{txn.id}",
-                                    txn: txn.clone(),
-                                    on_saved: move |_| {
-                                        editing_txn.set(None);
-                                        on_changed.call(());
-                                    },
-                                    on_cancel: move |_| editing_txn.set(None),
-                                }
-                            } else {
-                                div { class: "flex justify-between items-center py-3 border-b border-border",
-                                    div {
-                                        p { class: "m-0", "{txn.transaction_type.as_str()}" }
-                                        p { class: "text-text-tertiary text-xs m-0 mt-1", "{date(txn.transaction_date)}" }
-                                    }
-                                    div { class: "flex items-center gap-3",
-                                        p { class: "data-numeral m-0", "{money(txn.total)}" }
-                                        button {
-                                            class: "text-gold text-sm bg-transparent border-none cursor-pointer p-0",
-                                            onclick: move |_| editing_txn.set(Some(txn.id)),
-                                            "Edit"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            div {
                 div { class: "flex justify-between items-center mb-3",
-                    h2 { class: "text-sm font-semibold text-text-secondary uppercase tracking-wide m-0", "Comp history" }
+                    h2 { class: "text-sm font-semibold text-text-secondary uppercase tracking-wide m-0", "Timeline" }
                     Link {
                         to: crate::routes::Route::CompForHoldingRoute { holding_id },
                         class: "text-gold text-sm no-underline",
                         "+ Add comp"
                     }
                 }
-                if detail.appraisals.is_empty() {
-                    p { class: "text-text-secondary m-0", "No comps recorded." }
+                if detail.timeline.is_empty() {
+                    p { class: "text-text-secondary m-0", "Nothing recorded yet." }
                 } else {
                     div { class: "flex flex-col",
-                        for comp in detail.appraisals.iter().cloned() {
-                            div { class: "flex justify-between items-center py-3 border-b border-border",
-                                div {
-                                    p { class: "m-0", "{date(comp.appraised_date)}" }
-                                    if let Some(source) = &comp.source {
-                                        p { class: "text-text-tertiary text-xs m-0 mt-1", "{source}" }
+                        for entry in detail.timeline.iter().cloned() {
+                            {
+                                let editable_id = timeline_entry_txn_id(&entry);
+                                if editable_id.is_some() && editing_txn() == editable_id {
+                                    let txn_id = editable_id.expect("checked Some above");
+                                    let txn = detail
+                                        .transactions
+                                        .iter()
+                                        .find(|t| t.id == txn_id)
+                                        .cloned()
+                                        .expect("every editable timeline entry has a backing transaction");
+                                    rsx! {
+                                        TransactionEditForm {
+                                            key: "{timeline_entry_key(&entry)}",
+                                            txn,
+                                            on_saved: move |_| {
+                                                editing_txn.set(None);
+                                                on_changed.call(());
+                                            },
+                                            on_cancel: move |_| editing_txn.set(None),
+                                        }
+                                    }
+                                } else {
+                                    rsx! {
+                                        TimelineEntryView {
+                                            key: "{timeline_entry_key(&entry)}",
+                                            entry,
+                                            holding_status: detail.status,
+                                            on_edit: move |id| editing_txn.set(Some(id)),
+                                        }
                                     }
                                 }
-                                p { class: "data-numeral m-0", "{money(comp.appraised_value)}" }
                             }
                         }
                     }
@@ -440,6 +464,122 @@ fn PnlSummary(pnl: HoldingPnl) -> Element {
                 }
             } else {
                 p { class: "text-text-secondary text-sm mt-1 mb-0", "No comp on record yet." }
+            }
+        }
+    }
+}
+
+/// Dispatches one merged-timeline entry to its read-only rendering. Four
+/// of the five variants share an identical label/date/amount/notes/edit
+/// shape (`TimelineRow`, below) - only `Comp` differs enough (a source,
+/// a revised-from comparison, no edit affordance) to render inline here
+/// instead.
+#[component]
+fn TimelineEntryView(
+    entry: TimelineEntry,
+    holding_status: HoldingStatus,
+    on_edit: EventHandler<i64>,
+) -> Element {
+    match entry {
+        TimelineEntry::Acquisition {
+            id,
+            date: entry_date,
+            total,
+            notes,
+        } => rsx! {
+            TimelineRow { label: "Bought".to_string(), entry_date, amount: total, notes, edit_id: id, on_edit }
+        },
+        TimelineEntry::Adjustment {
+            id,
+            date: entry_date,
+            total,
+            notes,
+        } => rsx! {
+            TimelineRow { label: "Cost basis adjustment".to_string(), entry_date, amount: total, notes, edit_id: id, on_edit }
+        },
+        TimelineEntry::Sold {
+            id,
+            date: entry_date,
+            total,
+            notes,
+        } => rsx! {
+            TimelineRow { label: "Sold".to_string(), entry_date, amount: total, notes, edit_id: id, on_edit }
+        },
+        TimelineEntry::LostOrDamaged {
+            id,
+            date: entry_date,
+            residual_value,
+            insurance_recovery,
+            cause,
+            notes,
+        } => {
+            let label = if holding_status == HoldingStatus::Damaged {
+                "Damaged"
+            } else {
+                "Lost"
+            };
+            let proceeds = residual_value + insurance_recovery;
+            let combined_notes = match (cause, notes) {
+                (Some(cause), Some(n)) => Some(format!("Cause: {cause}. {n}")),
+                (Some(cause), None) => Some(format!("Cause: {cause}")),
+                (None, n) => n,
+            };
+            rsx! {
+                TimelineRow { label: label.to_string(), entry_date, amount: proceeds, notes: combined_notes, edit_id: id, on_edit }
+            }
+        }
+        TimelineEntry::Comp {
+            date: entry_date,
+            value,
+            source,
+            notes,
+            revised_from,
+            ..
+        } => rsx! {
+            div { class: "flex justify-between items-center py-3 border-b border-border",
+                div {
+                    p { class: "m-0", "Comp - {date(entry_date)}" }
+                    if let Some(source) = &source {
+                        p { class: "text-text-tertiary text-xs m-0 mt-1", "{source}" }
+                    }
+                    if let Some(prev) = revised_from {
+                        p { class: "text-text-tertiary text-xs m-0 mt-1", "Revised from {money(prev)}" }
+                    }
+                    if let Some(n) = &notes {
+                        p { class: "text-text-secondary text-sm m-0 mt-1", "{n}" }
+                    }
+                }
+                p { class: "data-numeral m-0", "{money(value)}" }
+            }
+        },
+    }
+}
+
+#[component]
+fn TimelineRow(
+    label: String,
+    entry_date: NaiveDate,
+    amount: Money,
+    notes: Option<String>,
+    edit_id: i64,
+    on_edit: EventHandler<i64>,
+) -> Element {
+    rsx! {
+        div { class: "flex justify-between items-center py-3 border-b border-border",
+            div {
+                p { class: "m-0", "{label}" }
+                p { class: "text-text-tertiary text-xs m-0 mt-1", "{date(entry_date)}" }
+                if let Some(n) = &notes {
+                    p { class: "text-text-secondary text-sm m-0 mt-1", "{n}" }
+                }
+            }
+            div { class: "flex items-center gap-3",
+                p { class: "data-numeral m-0", "{money(amount)}" }
+                button {
+                    class: "text-gold text-sm bg-transparent border-none cursor-pointer p-0",
+                    onclick: move |_| on_edit.call(edit_id),
+                    "Edit"
+                }
             }
         }
     }
