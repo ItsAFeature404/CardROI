@@ -17,7 +17,7 @@ pub struct HoldingOption {
     pub status: HoldingStatus,
 }
 
-fn load_holding_options(
+pub(crate) fn load_holding_options(
     status_filter: Option<HoldingStatus>,
     repo: &Repository,
 ) -> CardRoiResult<Vec<HoldingOption>> {

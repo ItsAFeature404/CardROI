@@ -1,14 +1,21 @@
-//! The home screen: "Welcome Me Back" - orientation and momentum, never
-//! a data dump. Hard-capped at 5 informational lines plus a closing
-//! prompt (greeting, headline status, attention, notable mover, newest
-//! addition) so a collector can read the whole thing in a few seconds -
-//! this cap is structural (every line below is an `Option`/count-driven
-//! branch, never a growing list), not just a styling choice, and any
-//! future addition here should bump an existing line, not just append
-//! a sixth.
+//! The home screen: an Action Center, not a report. Real research
+//! (Reddit patterns plus direct evidence from CollX/Card Ladder/Ludex
+//! reviews) confirmed collectors open a collection app for one of four
+//! recurring jobs - capture something, find something, see what
+//! changed, or go deeper - not for a single emotional moment. Card
+//! Details already owns emotional (one ownership's story); this screen
+//! owns effective.
 //!
-//! This screen's emotional space is orientation and momentum only - it
-//! never delivers hard news. The notable-mover line is deliberately
+//! Search and the capture actions (Buy/Sell/Comp) are deliberately one
+//! visual unit, not two - both are just ways to begin work. Everything
+//! else (headline value, attention, notable mover, newest addition)
+//! renders below, quieter, answering "what changed" for whoever has
+//! more than a few seconds - "go deeper" needs no content of its own
+//! here at all, since the persistent nav already does that job on every
+//! screen.
+//!
+//! This screen's emotional space stays orientation only - it never
+//! delivers hard news. The notable-mover line is deliberately
 //! gains-only; a holding that's down significantly belongs on that
 //! holding's own page, not here (see CLAUDE.md's "Emotional spaces"
 //! section). "Total P&L vs. cost basis" stands in for a conventional
@@ -27,6 +34,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use dioxus::prelude::*;
 use rust_decimal::Decimal;
 
+use crate::components::holding_picker::{HoldingOption, load_holding_options};
 use crate::local_prefs;
 use crate::routes::Route;
 use crate::web_bridge::WebBridge;
@@ -218,7 +226,8 @@ pub(crate) fn load_dashboard_data(repo: &Repository) -> CardRoiResult<DashboardD
         None => None,
     };
 
-    let newest_addition = find_newest_addition(&owned, today)
+    let newest_addition_holding = find_newest_addition(&owned, today);
+    let newest_addition = newest_addition_holding
         .map(|holding| -> CardRoiResult<NewestAddition> {
             let card = repo.get_card(holding.card_id)?;
             Ok(NewestAddition {
@@ -356,6 +365,7 @@ fn NamePrompt(on_done: EventHandler<()>) -> Element {
 
 #[component]
 fn DashboardBody(data: DashboardData) -> Element {
+    let bridge = use_context::<WebBridge>();
     let mut show_name_prompt = use_signal(|| !local_prefs::has_prompted_for_name());
     let mut collector_name = use_signal(local_prefs::collector_name);
     let greeting = greeting_for(Utc::now(), collector_name().as_deref());
@@ -363,6 +373,23 @@ fn DashboardBody(data: DashboardData) -> Element {
         collector_name.set(local_prefs::collector_name());
         show_name_prompt.set(false);
     };
+
+    // Search: "do I already own this," confirmed by real research as
+    // one of the four recurring reasons a collector opens this app.
+    // Fetch-all-then-filter-client-side, the same pattern already
+    // proven at this app's scale by `CardPicker`/`HoldingPicker` -
+    // reused, not reinvented. Navigating to a result (not selecting it
+    // into a form) is genuinely different from every existing use of
+    // this data, so it gets its own small block rather than reusing
+    // `HoldingPicker` itself.
+    let mut search_query = use_signal(String::new);
+    let search_options = use_resource({
+        let bridge = bridge.clone();
+        move || {
+            let bridge = bridge.clone();
+            async move { bridge.run(|repo| load_holding_options(None, repo)).await }
+        }
+    });
 
     if data.rollup.holding_count == 0 {
         return rsx! {
@@ -405,45 +432,111 @@ fn DashboardBody(data: DashboardData) -> Element {
         AttentionStatus::NeedsComps { count } => format!("{count} cards need fresh comps."),
     };
 
+    // Only computed once there's an actual query - an idle search box
+    // shouldn't force a render pass over the whole holding list.
+    let query_trimmed = search_query();
+    let query_trimmed = query_trimmed.trim();
+    let search_matches: Option<Vec<HoldingOption>> = if query_trimmed.is_empty() {
+        None
+    } else if let Some(Ok(options)) = search_options.read().as_ref() {
+        let query_lower = query_trimmed.to_lowercase();
+        Some(
+            options
+                .iter()
+                .filter(|o| o.label.to_lowercase().contains(&query_lower))
+                .take(8)
+                .cloned()
+                .collect(),
+        )
+    } else {
+        None
+    };
+
     rsx! {
-        div { class: "p-8 flex flex-col gap-6 max-w-2xl",
+        div { class: "p-8 flex flex-col gap-8 max-w-2xl",
             p { class: "data-numeral text-2xl m-0", "{greeting}" }
             if show_name_prompt() {
                 NamePrompt { on_done: on_name_done }
             }
 
-            div {
+            // The Action Center: search and capture are both just ways
+            // to begin work, so they're one visual unit, not two - the
+            // hero of the page in the sense of friction-free action,
+            // never a card or a number.
+            div { class: "rounded-[20px] bg-surface p-6 flex flex-col gap-4",
+                div {
+                    input {
+                        class: "bg-canvas text-text-primary border border-border rounded-radius px-3 py-2 font-data w-full",
+                        placeholder: "Search your collection...",
+                        value: "{search_query}",
+                        oninput: move |evt| search_query.set(evt.value()),
+                    }
+                    if let Some(matches) = &search_matches {
+                        div { class: "flex flex-col mt-2", style: "max-height: 240px; overflow-y: auto;",
+                            if matches.is_empty() {
+                                p { class: "text-text-secondary text-sm m-0 mt-1", "No matches." }
+                            } else {
+                                for option in matches.iter().cloned() {
+                                    Link {
+                                        key: "{option.holding_id}",
+                                        to: Route::HoldingDetailRoute { id: option.holding_id },
+                                        class: "flex justify-between items-center px-2 py-1.5 rounded-radius no-underline text-text-primary hover:bg-surface-elevated",
+                                        span { "{option.label}" }
+                                        span { class: "text-text-tertiary text-xs", "{option.status.as_str()}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                div { class: "flex gap-2 flex-wrap pt-2 border-t border-border",
+                    Link {
+                        to: Route::BuyRoute {},
+                        class: "px-4 py-2 rounded-radius bg-surface-elevated text-text-primary border border-border no-underline font-semibold cursor-pointer hover:bg-gold hover:text-canvas hover:border-transparent transition-colors duration-[var(--duration-standard)] ease-standard",
+                        "Log Buy"
+                    }
+                    Link {
+                        to: Route::SellRoute {},
+                        class: "px-4 py-2 rounded-radius bg-surface-elevated text-text-primary border border-border no-underline font-semibold cursor-pointer hover:bg-gold hover:text-canvas hover:border-transparent transition-colors duration-[var(--duration-standard)] ease-standard",
+                        "Log Sell"
+                    }
+                    Link {
+                        to: Route::CompRoute {},
+                        class: "px-4 py-2 rounded-radius bg-surface-elevated text-text-primary border border-border no-underline font-semibold cursor-pointer hover:bg-gold hover:text-canvas hover:border-transparent transition-colors duration-[var(--duration-standard)] ease-standard",
+                        "Add Comp"
+                    }
+                }
+            }
+
+            div { class: "flex flex-col gap-2 text-sm text-text-secondary",
                 p { class: "m-0",
                     "Your collection is worth "
-                    span { class: "data-numeral", "{money(total_value)}" }
+                    span { class: "data-numeral text-text-primary", "{money(total_value)}" }
                     ", based on your latest recorded research."
                 }
-                p { class: "data-numeral m-0 mt-1 {pnl_class}",
+                p { class: "data-numeral m-0 {pnl_class}",
                     "{sign}{money(total_pnl)} since cost basis"
                     if let Some(pct) = total_pnl_pct {
                         " ({percent(pct)})"
                     }
                 }
                 if rollup.appraised_open_count < open_count {
-                    p { class: "text-text-tertiary text-xs mt-2 mb-0",
+                    p { class: "text-text-tertiary text-xs m-0",
                         "Unrealized P&L reflects user-supplied comps, not live market values - {rollup.appraised_open_count}/{open_count} open holdings priced"
                     }
                 }
-            }
-
-            p { class: "m-0", "{attention_line}" }
-
-            if let Some(mover) = &data.notable_mover {
-                p { class: "m-0",
-                    "{mover.card_name} is up "
-                    span { class: "data-numeral text-gain", "{percent(mover.unrealized_roi_pct)}" }
-                    " since you bought it."
+                p { class: "m-0", "{attention_line}" }
+                if let Some(mover) = &data.notable_mover {
+                    p { class: "m-0",
+                        "{mover.card_name} is up "
+                        span { class: "data-numeral text-gain", "{percent(mover.unrealized_roi_pct)}" }
+                        " since you bought it."
+                    }
                 }
-            }
-
-            if let Some(addition) = &data.newest_addition {
-                p { class: "m-0",
-                    "You logged {addition.card_name} {logged_recency_phrase(addition.logged_days_ago)}."
+                if let Some(addition) = &data.newest_addition {
+                    p { class: "m-0",
+                        "You logged {addition.card_name} {logged_recency_phrase(addition.logged_days_ago)}."
+                    }
                 }
             }
 
