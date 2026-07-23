@@ -4,9 +4,10 @@
 
 **🚧 Actively in development.** The core ledger and analytics are solid
 and tested, but the app is missing pieces a first-time visitor would
-expect — no Settings screen, no Ledger screen, no way to scan/photograph
-a card yet. See [Status & Roadmap](#status--roadmap) before you rely on
-it for anything real.
+expect — no Settings screen, no Ledger screen, no camera scan-to-identify
+yet (you can attach a photo to a holding, but nothing reads a card from
+it). See [Status & Roadmap](#status--roadmap) before you rely on it for
+anything real.
 
 **[Try it live →](https://itsafeature404.github.io/CardROI/)**
 
@@ -51,13 +52,31 @@ your device unless you explicitly export it.
   for your data.
 - Responsive from the ground up: a sidebar on desktop, a bottom nav plus
   a floating quick-action button on phone — not a desktop layout
-  squeezed down.
-- Dashboard, a paginated/groupable portfolio table (by set, player, or
-  sport), per-holding drill-down (full transaction and comp history,
-  What-If sale simulation, Mark Lost/Damaged, inline edit, and a
-  danger-zone delete), Buy/Sell/Comp entry forms, an advanced performance
-  view (IRR/TWR behind a "Show advanced" toggle) and a risk/allocation
-  view (diversification score, concentration bar, allocation donut).
+  squeezed down. The sidebar carries the app's own identity (and the
+  browser tab gets a real title) — a small thing, but a first-time
+  visitor should never wonder what app they're even in.
+- A one-time "what should I call you" prompt (answer or skip — it never
+  asks twice either way), so the Dashboard's greeting is personal
+  ("Good morning, Alex") rather than generic. Stored in the browser's own
+  local storage, not the collection database — clearing it doesn't touch
+  a single card.
+- Dashboard: search your whole collection, jump straight into Buy/Sell/
+  Comp, see what's changed since you were last here (a new addition, a
+  genuine gain, a comp gone stale), a quick read on whether your
+  collection's pricing is current, and a running list of suggested next
+  actions — oriented around what you'd actually do in a given visit, not
+  a static portfolio-value readout.
+- A paginated/groupable portfolio table (by set, player, or sport),
+  per-holding drill-down (a merged ownership timeline interleaving
+  transactions and comps chronologically, how long you've owned it in
+  plain language, your own notes on the holding surfaced right alongside
+  the numbers, a photo of the physical card you can add/replace/remove
+  any time, What-If sale simulation paired with a direct Sell action,
+  Mark Lost/Damaged, inline edit of both the holding and its underlying
+  card catalog entry, and a danger-zone delete), Buy/Sell/Comp entry
+  forms, an advanced performance view (IRR/TWR behind a "Show advanced"
+  toggle) and a risk/allocation view (diversification score,
+  concentration bar, allocation donut).
 - See [Status & Roadmap](#status--roadmap) for exactly what's built
   versus still in progress.
 
@@ -71,14 +90,23 @@ your device unless you explicitly export it.
   guards (e.g. a card can't be deleted while holdings still reference it)
 - Buy/sell with price, fees, shipping, tax, and other costs tracked
   separately
-- Correct a data-entry mistake after the fact: edit a holding or a
-  transaction (serial, grade, price, date, ...) without disturbing
-  anything else; deleting a holding with transactions on it requires an
-  explicit, separate confirmation — a deliberate override of the normal
-  safeguard that otherwise keeps ledger history from ever being silently
-  lost
+- Correct a data-entry mistake after the fact: edit a holding, a
+  transaction (serial, grade, price, date, ...), or a card's own catalog
+  identity (player, number, variant, parallel, print run, rookie/
+  autograph/relic) without disturbing anything else. A card correction
+  intentionally ripples to every holding that references it — they're
+  the same physical print, not independent facts — while a holding's own
+  edits (its grading, serial, notes) never touch any other holding.
+  Deleting a holding with transactions on it requires an explicit,
+  separate confirmation — a deliberate override of the normal safeguard
+  that otherwise keeps ledger history from ever being silently lost
 - Grading support (grade, grading company, cert number), serial numbers,
   print runs, parallels, variants, rookie/autograph/relic flags
+- Attach, replace, or remove a photo of the physical card on a holding —
+  a phone's camera or a desktop file picker, one reference photo at a
+  time. This is not a scan-to-identify feature: nothing reads a card's
+  catalog details off the photo, it's purely a picture you attach
+  yourself
 - Loss/damage tracking (Mark Lost/Damaged) records a real realized loss —
   optional residual/salvage value and insurance recovery, tracked
   separately — not just a status flip; guarded so a sold holding's status
@@ -282,11 +310,18 @@ cardroi card add --set-id 1 --number 123 --player "LeBron James" \
   --rookie --autograph --relic --notes "..."
 cardroi card list [--set-id <id>]
 cardroi card show <id>
+cardroi card edit <id> [--number "..."] [--player "..."] [--variant "..."] \
+  [--parallel "..."] [--print-run "..."] [--rookie] [--autograph] \
+  [--relic] [--notes "..."]
 cardroi card delete <id>       # fails if any holdings still reference it
 ```
 
 A set is unique on `(name, sport, year)`; a card is unique within a set on
-`(number, variant, parallel)`.
+`(number, variant, parallel)`. `card edit` only changes fields you pass a
+flag for (omit to leave as-is, empty string to clear an optional one) and
+affects every holding referencing that card — they're the same catalog
+print. `--rookie`/`--autograph`/`--relic` can only be turned on this way,
+not back off, in the current version.
 </details>
 
 <details>
@@ -456,22 +491,32 @@ the per-card breakdown only.
 
 ```bash
 cargo build                                          # debug build
-cargo test                                           # full test suite
+cargo test                                           # full test suite (root crate/CLI only - see below)
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 cargo audit                                          # dependency advisories
 
-# the web app (a separate build target, see "The app" above)
+# the web app (a separate build target, see "The app" above) - a plain
+# `cargo test` from the repo root never touches this crate at all
 cargo clippy -p cardroi-web --target wasm32-unknown-unknown --all-targets -- -D warnings
+cargo test -p cardroi-web --target wasm32-unknown-unknown
 ```
+
+The web app's tests need a real wasm-aware runner, not a bare `cargo
+test` — a plain wasm32 binary can't execute at all on its own (the linked
+wasm-bindgen glue needs a JS host). They run via `wasm-bindgen-test-runner`
+under Node (configured in `.cargo/config.toml`); install a matching
+`wasm-bindgen-cli` with
+`cargo install wasm-bindgen-cli --version <version from Cargo.lock> --locked`
+if you don't already have Node + a version-matched CLI.
 
 This project is built following a spec/plan/TDD discipline: every task is
 specced, planned, and test-first before implementation, with every
 financial calculation backed by a hand-computed or independently
 cross-checked reference value — never just "it doesn't panic." CI runs
 the full test suite plus `clippy`/`fmt` checks on Linux, macOS, and
-Windows, and a `wasm32-unknown-unknown` build+clippy check for the app,
-on every push.
+Windows, and a `wasm32-unknown-unknown` build, clippy, **and full test**
+run for the app, on every push.
 
 ## Contributing
 
@@ -500,10 +545,16 @@ often.
 **Works today**, cross-checked against the CLI's own output: real SQLite
 persistence in the browser (confirmed surviving a tab reload, full
 browser close/reopen, and a home-screen-installed close/reopen on a
-real phone), a responsive nav shell, Dashboard, Portfolio (grouping +
+real phone), a responsive nav shell carrying the app's own identity, a
+one-time personalized-greeting prompt, a Dashboard organized around
+search/capture, what's changed since your last visit, a pricing-coverage
+status check, and suggested next actions, Portfolio (grouping +
 pagination, verified against a 10,000+ holding synthetic database),
-per-holding drill-down (transaction/comp history, What-If, Mark Lost/
-Damaged, inline edit, and delete), Buy/Sell/Comp forms, an advanced
+per-holding drill-down (a merged ownership timeline of transactions and
+comps, ownership duration in plain language, your own notes surfaced
+alongside the numbers, a photo of the physical card you can add/replace/
+remove, What-If paired with Sell, Mark Lost/Damaged, inline edit of both
+the holding and its card, and delete), Buy/Sell/Comp forms, an advanced
 performance view (IRR/TWR), and a risk/allocation view (diversification
 score, by-set/player/sport allocation).
 
@@ -515,15 +566,21 @@ score, by-set/player/sport allocation).
   of it yet.
 
 **Not in the app at all yet** (no menu entry, no placeholder):
-- **Scanning/photographing a card.** Every card and holding is entered
-  by typing its details in — there's no camera capture. The desktop
-  prototype this project evolved from had one; it didn't carry over to
-  the web rebuild and needs a from-scratch design for a browser camera
-  API before it comes back.
+- **Scan-to-identify a card.** A holding can have a reference photo
+  attached (phone camera or file picker) — but nothing reads a card's
+  catalog details off it. Auto-identifying a card from a photo (what
+  competitors' "Scan Card" features do) is a separate, unbuilt
+  capability, and a materially harder problem (parallels and older cards
+  are notoriously easy to misidentify even for purpose-built scanners) —
+  not just a smaller version of photo capture.
 - **In-browser import/export.** CSV/JSON import exists and is tested,
   but only via the CLI (`cardroi import`) — no UI for it yet.
 - **Cross-device sync.** See [The app](#the-app) above — each browser's
   data is currently its own island.
+- **Duplicate detection.** Deliberately not attempted yet: a naive
+  same-card-twice check would misfire on completely normal collecting
+  (owning two raw copies of the same card on purpose isn't a duplicate
+  risk) — needs its own design pass, not a quick heuristic.
 - A Playwright end-to-end test suite, and beyond that, tax/insurance
   reporting and an HTML/PDF dashboard — both still unspecced.
 
