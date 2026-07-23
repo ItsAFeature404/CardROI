@@ -21,21 +21,14 @@ use crate::web_bridge::WebBridge;
 
 /// A hidden file input behind a plain text/icon trigger - `uploading`
 /// disables it and swaps the label so a second tap mid-upload can't fire
-/// a second overlapping request.
-///
-/// `current_photo_id`: v1 ships single-primary-photo only, so uploading
-/// a second photo replaces the first rather than adding to it - deleted
-/// before the new upload, not after, so a failed upload never leaves the
-/// holding with zero photos it didn't ask to lose. Without this, the
-/// repository's own "first upload is primary" rule would make a second
-/// upload silently become a non-primary photo this UI never shows,
-/// which would look like the upload did nothing.
+/// a second overlapping request. Every upload appends a new photo -
+/// `add_photo`'s own existing logic already makes the first upload for a
+/// holding primary and every later one non-primary, so this needs no
+/// caller-side special-casing; a real gallery (`PhotoGallery` on Card
+/// Details) is where a collector manages which one is primary or removes
+/// one, not this control.
 #[component]
-pub fn PhotoCapture(
-    holding_id: i64,
-    current_photo_id: Option<i64>,
-    on_uploaded: EventHandler<HoldingImage>,
-) -> Element {
+pub fn PhotoCapture(holding_id: i64, on_uploaded: EventHandler<HoldingImage>) -> Element {
     let bridge = use_context::<WebBridge>();
     let mut uploading = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -56,12 +49,7 @@ pub fn PhotoCapture(
                 Ok(bytes) => {
                     let bytes = bytes.to_vec();
                     let outcome = bridge
-                        .run(move |repo| {
-                            if let Some(existing_id) = current_photo_id {
-                                repo.delete_photo(existing_id, PhotoStorage::Inline)?;
-                            }
-                            repo.add_photo(holding_id, &bytes, PhotoStorage::Inline)
-                        })
+                        .run(move |repo| repo.add_photo(holding_id, &bytes, PhotoStorage::Inline))
                         .await;
                     uploading.set(false);
                     match outcome {
@@ -82,8 +70,6 @@ pub fn PhotoCapture(
             label { class: "text-gold text-sm cursor-pointer",
                 if uploading() {
                     "Uploading..."
-                } else if current_photo_id.is_some() {
-                    "Replace photo"
                 } else {
                     "Add a photo"
                 }

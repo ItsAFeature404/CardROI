@@ -15,6 +15,8 @@
 //! functions), then selecting one group filters the paginated table down
 //! to it.
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use cardroi::analytics::portfolio;
 use cardroi::analytics::roi::{self, RollupPnl};
 use cardroi::db::repository::Repository;
@@ -22,6 +24,8 @@ use cardroi::error::Result as CardRoiResult;
 use cardroi::models::{HoldingStatus, Money};
 use chrono::NaiveDate;
 use dioxus::prelude::*;
+use dioxus_free_icons::Icon;
+use dioxus_free_icons::icons::ld_icons::LdImage;
 
 use crate::routes::Route;
 use crate::web_bridge::WebBridge;
@@ -65,6 +69,12 @@ struct HoldingRow {
     cost_basis: Money,
     realized_pnl: Option<Money>,
     unrealized_pnl: Option<Money>,
+    /// The primary photo's small thumbnail, if one exists - fetched via
+    /// `get_primary_thumbnail` (thumbnail bytes only), never
+    /// `list_photos_for_holding` (which would also pull each row's
+    /// potentially much larger `full_data` BLOB for data never shown
+    /// here).
+    thumbnail: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -133,6 +143,7 @@ fn load_holdings_page(
         let card = repo.get_card(holding.card_id)?;
         let set = repo.get_set(card.set_id)?;
         let pnl = roi::holding_pnl(repo, holding.id)?;
+        let thumbnail = repo.get_primary_thumbnail(holding.id)?;
         rows.push(HoldingRow {
             holding_id: holding.id,
             card_name: card.display_name(),
@@ -142,6 +153,7 @@ fn load_holdings_page(
             cost_basis: pnl.cost_basis,
             realized_pnl: pnl.realized_pnl,
             unrealized_pnl: pnl.unrealized_pnl,
+            thumbnail,
         });
     }
 
@@ -381,6 +393,26 @@ fn HoldingsTable(
     }
 }
 
+/// A small avatar-sized rendering of a holding's primary-photo
+/// thumbnail, or the same neutral placeholder Card Details' hero uses
+/// when there isn't one - one consistent "this is a photo slot" idiom
+/// across the app rather than a screen-specific empty state.
+#[component]
+fn RowThumbnail(thumbnail: Option<Vec<u8>>) -> Element {
+    rsx! {
+        div { class: "w-8 h-8 shrink-0 rounded-md overflow-hidden bg-surface-elevated flex items-center justify-center",
+            if let Some(bytes) = &thumbnail {
+                img {
+                    class: "w-full h-full object-cover",
+                    src: "data:image/jpeg;base64,{BASE64.encode(bytes)}",
+                }
+            } else {
+                Icon { icon: LdImage, width: 14, height: 14, class: "text-text-tertiary opacity-50" }
+            }
+        }
+    }
+}
+
 #[component]
 fn HoldingTableRow(row: HoldingRow) -> Element {
     let acquired = row
@@ -400,11 +432,17 @@ fn HoldingTableRow(row: HoldingRow) -> Element {
             to: Route::HoldingDetailRoute { id: row.holding_id },
             class: "block border-b border-border no-underline text-text-primary hover:bg-surface",
 
-            // Desktop: dense 5-column grid row.
+            // Desktop: dense 5-column grid row. The thumbnail is an
+            // avatar prepended to the name cell, not its own grid column
+            // - adding a column would disturb every other row's
+            // alignment for a decoration, not new information.
             div {
                 class: "hidden md:grid gap-4 py-3 items-center",
                 style: "grid-template-columns: 2fr 1.5fr 1fr 1fr 1fr;",
-                span { "{row.card_name}" }
+                div { class: "flex items-center gap-2 min-w-0",
+                    RowThumbnail { thumbnail: row.thumbnail.clone() }
+                    span { class: "truncate", "{row.card_name}" }
+                }
                 span { class: "text-text-secondary", "{row.set_name}" }
                 span { class: "text-text-secondary", "{row.status.as_str()}" }
                 span { class: "text-text-secondary", "{acquired}" }
@@ -424,7 +462,10 @@ fn HoldingTableRow(row: HoldingRow) -> Element {
             div {
                 class: "flex md:hidden flex-col gap-1 py-3",
                 div { class: "flex justify-between items-baseline gap-2",
-                    span { class: "font-medium truncate", "{row.card_name}" }
+                    div { class: "flex items-center gap-2 min-w-0",
+                        RowThumbnail { thumbnail: row.thumbnail.clone() }
+                        span { class: "font-medium truncate", "{row.card_name}" }
+                    }
                     span { class: "data-numeral shrink-0", "{money(row.cost_basis)}" }
                 }
                 div { class: "flex justify-between items-baseline gap-2 text-text-secondary text-xs",

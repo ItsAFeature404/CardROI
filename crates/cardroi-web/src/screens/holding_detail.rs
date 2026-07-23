@@ -218,10 +218,10 @@ struct HoldingDetailData {
     // `appraisals` has no equivalent need (comps have no edit form
     // anywhere in this app) and isn't kept.
     transactions: Vec<Transaction>,
-    /// The primary photo, if one's been added - `list_photos_for_holding`
-    /// already orders primary-first, so `.next()` is enough; no second
-    /// query or sort needed.
-    primary_photo: Option<HoldingImage>,
+    /// Every photo on this holding, primary first - `list_photos_for_holding`
+    /// already orders them this way, so `photos.first()` is always the
+    /// primary with no second sort needed.
+    photos: Vec<HoldingImage>,
 }
 
 fn load_holding_detail(holding_id: i64, repo: &Repository) -> CardRoiResult<HoldingDetailData> {
@@ -233,7 +233,7 @@ fn load_holding_detail(holding_id: i64, repo: &Repository) -> CardRoiResult<Hold
     let appraisals = repo.list_appraisals_for_holding(holding_id)?;
     let timeline = build_timeline(&transactions, &appraisals);
     let ownership_duration_days = ownership_duration_days(&holding, Utc::now().date_naive());
-    let primary_photo = repo.list_photos_for_holding(holding_id)?.into_iter().next();
+    let photos = repo.list_photos_for_holding(holding_id)?;
 
     Ok(HoldingDetailData {
         card_name: card.display_name(),
@@ -245,7 +245,7 @@ fn load_holding_detail(holding_id: i64, repo: &Repository) -> CardRoiResult<Hold
         pnl,
         timeline,
         transactions,
-        primary_photo,
+        photos,
     })
 }
 
@@ -324,7 +324,7 @@ fn HoldingDetailBody(
                     // only ever discoverable by hovering the photo
                     // itself, not a separate always-visible control.
                     div { class: "group relative w-32 h-32 shrink-0 rounded-2xl overflow-hidden bg-surface-elevated flex items-center justify-center",
-                        if let Some(photo) = &detail.primary_photo {
+                        if let Some(photo) = detail.photos.first() {
                             img {
                                 class: "w-full h-full object-cover",
                                 src: "data:image/jpeg;base64,{BASE64.encode(&photo.thumbnail_data)}",
@@ -416,8 +416,15 @@ fn HoldingDetailBody(
                         PhotoCapture {
                             key: "{holding_id}",
                             holding_id,
-                            current_photo_id: detail.primary_photo.as_ref().map(|p| p.id),
                             on_uploaded: move |_| on_changed.call(()),
+                        }
+                        if !detail.photos.is_empty() {
+                            PhotoGallery {
+                                key: "{holding_id}",
+                                holding_id,
+                                photos: detail.photos.clone(),
+                                on_changed: move |_| on_changed.call(()),
+                            }
                         }
                     }
                 }
@@ -1276,6 +1283,129 @@ fn submit_transaction_edit(
     repo.update_transaction(txn_id, &edit)
 }
 
+/// Computes the new photo order after dragging `dragged_id` onto
+/// `target_id`'s tile - removes `dragged_id` from `current`, then
+/// reinserts it right where `target_id` now sits. A pure function so the
+/// actual reorder math is testable without a DOM/drag event at all.
+/// Dragging a tile onto itself is a no-op, not an append-to-the-end bug.
+fn reorder_ids(current: &[i64], dragged_id: i64, target_id: i64) -> Vec<i64> {
+    if dragged_id == target_id {
+        return current.to_vec();
+    }
+    let mut ids: Vec<i64> = current
+        .iter()
+        .copied()
+        .filter(|&id| id != dragged_id)
+        .collect();
+    let target_index = ids
+        .iter()
+        .position(|&id| id == target_id)
+        .unwrap_or(ids.len());
+    ids.insert(target_index, dragged_id);
+    ids
+}
+
+/// Every photo on a holding, as a small grid of tiles - reached via the
+/// same edit-mode toggle `PhotoCapture` already sits under, right below
+/// it. Each tile: drag to reorder (native HTML5 drag-and-drop, no
+/// third-party crate - Dioxus 0.7 wires `ondragstart`/`ondragover`/
+/// `ondrop` straight to the real DOM on web), click a non-primary tile
+/// to make it primary, hover to reveal the same delete-X idiom the hero
+/// photo already uses.
+#[component]
+fn PhotoGallery(
+    holding_id: i64,
+    photos: Vec<HoldingImage>,
+    on_changed: EventHandler<()>,
+) -> Element {
+    let bridge = use_context::<WebBridge>();
+    let mut dragging_id = use_signal(|| None::<i64>);
+    let ids: Vec<i64> = photos.iter().map(|p| p.id).collect();
+
+    rsx! {
+        div { class: "flex flex-wrap gap-2",
+            for photo in photos.iter().cloned() {
+                div {
+                    key: "{photo.id}",
+                    class: if photo.is_primary {
+                        "group relative w-16 h-16 shrink-0 rounded-lg overflow-hidden ring-2 ring-gold cursor-grab"
+                    } else {
+                        "group relative w-16 h-16 shrink-0 rounded-lg overflow-hidden cursor-grab"
+                    },
+                    draggable: "true",
+                    ondragstart: {
+                        let photo_id = photo.id;
+                        move |_| dragging_id.set(Some(photo_id))
+                    },
+                    ondragover: move |evt| evt.prevent_default(),
+                    ondrop: {
+                        let bridge = bridge.clone();
+                        let ids = ids.clone();
+                        let target_id = photo.id;
+                        move |_| {
+                            let Some(dragged_id) = dragging_id() else {
+                                return;
+                            };
+                            dragging_id.set(None);
+                            if dragged_id == target_id {
+                                return;
+                            }
+                            let bridge = bridge.clone();
+                            let new_order = reorder_ids(&ids, dragged_id, target_id);
+                            spawn(async move {
+                                let _ = bridge
+                                    .run(move |repo| repo.reorder_photos(holding_id, &new_order))
+                                    .await;
+                                on_changed.call(());
+                            });
+                        }
+                    },
+                    onclick: {
+                        let bridge = bridge.clone();
+                        let photo_id = photo.id;
+                        let is_primary = photo.is_primary;
+                        move |_| {
+                            if is_primary {
+                                return;
+                            }
+                            let bridge = bridge.clone();
+                            spawn(async move {
+                                let _ = bridge
+                                    .run(move |repo| repo.set_primary_photo(holding_id, photo_id))
+                                    .await;
+                                on_changed.call(());
+                            });
+                        }
+                    },
+                    img {
+                        class: "w-full h-full object-cover pointer-events-none",
+                        src: "data:image/jpeg;base64,{BASE64.encode(&photo.thumbnail_data)}",
+                    }
+                    button {
+                        class: "absolute top-0.5 right-0.5 w-5 h-5 flex items-center justify-center rounded-full bg-canvas/70 text-text-tertiary opacity-0 group-hover:opacity-100 border-none cursor-pointer transition-opacity duration-[var(--duration-standard)] ease-standard hover:text-loss",
+                        "aria-label": "Remove photo",
+                        onclick: {
+                            let bridge = bridge.clone();
+                            let photo_id = photo.id;
+                            move |evt: MouseEvent| {
+                                evt.stop_propagation();
+                                let bridge = bridge.clone();
+                                spawn(async move {
+                                    let _ = bridge
+                                        .run(move |repo| repo.delete_photo(photo_id, PhotoStorage::Inline))
+                                        .await;
+                                    on_changed.call(());
+                                });
+                            }
+                        },
+                        Icon { icon: LdX, width: 12, height: 12 }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Corrects an existing transaction's own fields (wrong price, wrong
 /// date, a typo) - not its type or which holding it's on. Reached via the
 /// "Edit" link on that transaction's row in Transaction history.
@@ -1548,6 +1678,18 @@ mod tests {
         // Confirmed via the real repository round-trip, not just the
         // returned value - proves the row itself was actually updated.
         assert_eq!(repo.get_card(card_id).unwrap(), updated);
+    }
+
+    #[wasm_bindgen_test]
+    fn reorder_ids_moves_the_dragged_id_to_the_target_and_closes_the_gap() {
+        assert_eq!(reorder_ids(&[1, 2, 3], 1, 3), vec![2, 1, 3]);
+        assert_eq!(reorder_ids(&[1, 2, 3], 3, 1), vec![3, 1, 2]);
+        assert_eq!(reorder_ids(&[1, 2, 3, 4], 4, 2), vec![1, 4, 2, 3]);
+    }
+
+    #[wasm_bindgen_test]
+    fn reorder_ids_dropping_a_tile_onto_itself_is_a_no_op() {
+        assert_eq!(reorder_ids(&[1, 2, 3], 2, 2), vec![1, 2, 3]);
     }
 
     #[wasm_bindgen_test]

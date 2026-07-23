@@ -49,7 +49,15 @@ fn seed_holding(repo: &Repository) -> i64 {
 /// A real, decodable JPEG of the given size, solid-colored - enough to
 /// exercise decode/resize/re-encode without a checked-in binary fixture.
 fn fake_jpeg(width: u32, height: u32) -> Vec<u8> {
-    let img = image::ImageBuffer::from_pixel(width, height, image::Rgb([200u8, 50, 50]));
+    fake_jpeg_colored(width, height, [200, 50, 50])
+}
+
+/// Same as `fake_jpeg`, but with a caller-chosen solid color - for tests
+/// that need two genuinely distinguishable photos (a resized thumbnail
+/// of two same-color, differently-sized solid images is byte-identical,
+/// which would make an equality assertion meaningless).
+fn fake_jpeg_colored(width: u32, height: u32, color: [u8; 3]) -> Vec<u8> {
+    let img = image::ImageBuffer::from_pixel(width, height, image::Rgb(color));
     let mut bytes = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90)
         .encode(&img, width, height, image::ExtendedColorType::Rgb8)
@@ -303,6 +311,118 @@ fn set_primary_photo_leaves_exactly_one_primary() {
             .unwrap()
             .is_primary
     );
+}
+
+#[test]
+fn get_primary_thumbnail_returns_none_for_a_photo_less_holding() {
+    let repo = repo();
+    let holding_id = seed_holding(&repo);
+
+    assert!(repo.get_primary_thumbnail(holding_id).unwrap().is_none());
+}
+
+#[test]
+fn get_primary_thumbnail_returns_the_primarys_thumbnail_specifically() {
+    let repo = repo();
+    let holding_id = seed_holding(&repo);
+    let images_root = tempdir().unwrap();
+
+    let first = repo
+        .add_photo(
+            holding_id,
+            &fake_jpeg_colored(400, 300, [200, 50, 50]),
+            PhotoStorage::Disk(images_root.path()),
+        )
+        .unwrap();
+    let second = repo
+        .add_photo(
+            holding_id,
+            &fake_jpeg_colored(300, 400, [50, 50, 200]),
+            PhotoStorage::Disk(images_root.path()),
+        )
+        .unwrap();
+    repo.set_primary_photo(holding_id, second.id).unwrap();
+
+    let thumbnail = repo.get_primary_thumbnail(holding_id).unwrap().unwrap();
+    assert_eq!(thumbnail, second.thumbnail_data);
+    assert_ne!(thumbnail, first.thumbnail_data);
+}
+
+#[test]
+fn reorder_photos_persists_the_new_order() {
+    let repo = repo();
+    let holding_id = seed_holding(&repo);
+    let images_root = tempdir().unwrap();
+
+    let first = repo
+        .add_photo(
+            holding_id,
+            &fake_jpeg(400, 300),
+            PhotoStorage::Disk(images_root.path()),
+        )
+        .unwrap();
+    let second = repo
+        .add_photo(
+            holding_id,
+            &fake_jpeg(300, 400),
+            PhotoStorage::Disk(images_root.path()),
+        )
+        .unwrap();
+    let third = repo
+        .add_photo(
+            holding_id,
+            &fake_jpeg(500, 500),
+            PhotoStorage::Disk(images_root.path()),
+        )
+        .unwrap();
+
+    // Reverse the insertion order, keeping `first` (the primary) last.
+    repo.reorder_photos(holding_id, &[third.id, second.id, first.id])
+        .unwrap();
+
+    // list_photos_for_holding orders primary DESC first, so `first`
+    // (still primary) leads regardless of its new `position` - the
+    // reorder is only visible among the non-primary photos here.
+    let photos = repo.list_photos_for_holding(holding_id).unwrap();
+    assert_eq!(photos[0].id, first.id, "primary still sorts first");
+    assert_eq!(
+        photos[1..].iter().map(|p| p.id).collect::<Vec<_>>(),
+        vec![third.id, second.id],
+        "non-primary photos reflect the new order"
+    );
+}
+
+#[test]
+fn reorder_photos_rejects_an_id_not_belonging_to_the_holding() {
+    let repo = repo();
+    let holding_a = seed_holding(&repo);
+    let holding_b = seed_holding(&repo);
+    let images_root = tempdir().unwrap();
+
+    let photo_a = repo
+        .add_photo(
+            holding_a,
+            &fake_jpeg(400, 300),
+            PhotoStorage::Disk(images_root.path()),
+        )
+        .unwrap();
+    let photo_b = repo
+        .add_photo(
+            holding_b,
+            &fake_jpeg(400, 300),
+            PhotoStorage::Disk(images_root.path()),
+        )
+        .unwrap();
+
+    let err = repo
+        .reorder_photos(holding_a, &[photo_a.id, photo_b.id])
+        .unwrap_err();
+    assert!(err.to_string().contains("holding_image"));
+
+    // Nothing should have been persisted from the failed reorder - not
+    // even photo_a's own position change, since this is one transaction.
+    let photos = repo.list_photos_for_holding(holding_a).unwrap();
+    assert_eq!(photos[0].position, 0);
 }
 
 #[test]

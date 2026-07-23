@@ -238,6 +238,22 @@ impl Repository {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Just the primary photo's thumbnail bytes, or `None` if this
+    /// holding has no photo - for list/table contexts (Portfolio) that
+    /// need a small avatar for many rows at once and must not pull each
+    /// row's full-size `full_data` BLOB (or on-disk file) to get it.
+    pub fn get_primary_thumbnail(&self, holding_id: i64) -> Result<Option<Vec<u8>>> {
+        self.conn
+            .query_row(
+                "SELECT thumbnail_data FROM holding_images
+                 WHERE holding_id = ?1 AND is_primary = 1",
+                params![holding_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     /// Flips the primary flag to `image_id` (which must belong to
     /// `holding_id`) in one transaction, matching the schema's partial
     /// unique index.
@@ -253,6 +269,26 @@ impl Repository {
         )?;
         if affected == 0 {
             return Err(CardRoiError::not_found("holding_image", image_id));
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Sets each id's `position` to its index in `ordered_ids` - one
+    /// transaction, all-or-nothing. `ordered_ids` must be exactly the set
+    /// of photo ids currently belonging to `holding_id` (enforced by an
+    /// affected-rows check on every update), so a stale client-side list
+    /// can't silently drop or orphan a photo's position.
+    pub fn reorder_photos(&self, holding_id: i64, ordered_ids: &[i64]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        for (position, image_id) in ordered_ids.iter().enumerate() {
+            let affected = tx.execute(
+                "UPDATE holding_images SET position = ?1 WHERE id = ?2 AND holding_id = ?3",
+                params![position as i64, image_id, holding_id],
+            )?;
+            if affected == 0 {
+                return Err(CardRoiError::not_found("holding_image", *image_id));
+            }
         }
         tx.commit()?;
         Ok(())

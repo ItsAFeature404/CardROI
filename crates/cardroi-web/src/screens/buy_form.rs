@@ -18,6 +18,8 @@ use chrono::NaiveDate;
 use dioxus::prelude::*;
 
 use crate::components::form_field::FormField;
+use crate::components::photo::PhotoCapture;
+use crate::routes::Route;
 use crate::screens::format::money;
 use crate::web_bridge::WebBridge;
 
@@ -203,12 +205,12 @@ fn submit_existing_card(
     card_id: i64,
     inputs: AcquisitionInputs,
     repo: &Repository,
-) -> CardRoiResult<Money> {
+) -> CardRoiResult<(i64, Money)> {
     let transaction_date = parse_date_or_today(&inputs.date)?;
     let holding = build_holding(card_id, transaction_date, &inputs);
     let new_txn = build_transaction(0, &inputs)?;
-    let (_, txn) = repo.record_acquisition(&holding, new_txn)?;
-    Ok(txn.total)
+    let (holding, txn) = repo.record_acquisition(&holding, new_txn)?;
+    Ok((holding.id, txn.total))
 }
 
 pub(crate) fn submit_new_card(
@@ -304,6 +306,12 @@ pub fn BuyForm() -> Element {
 
     let mut error = use_signal(|| None::<String>);
     let mut submitted_total = use_signal(|| None::<Money>);
+    // Only ever `Some` on the "existing card" path - `import_acquisitions`
+    // (the "new card" path) hands back no per-row created holding id at
+    // all, since it's a bulk-import-shaped API shared with the CLI's
+    // `cardroi import`. A card bought via "new card" still gets its photo
+    // added afterward on Card Details, which already fully supports it.
+    let mut submitted_holding_id = use_signal(|| None::<i64>);
 
     let acquisition_inputs = move || AcquisitionInputs {
         price: price_input(),
@@ -342,8 +350,9 @@ pub fn BuyForm() -> Element {
                         .run(move |repo| submit_existing_card(card.card_id, inputs, repo))
                         .await;
                     match outcome {
-                        Ok(total) => {
+                        Ok((holding_id, total)) => {
                             error.set(None);
+                            submitted_holding_id.set(Some(holding_id));
                             submitted_total.set(Some(total));
                         }
                         Err(err) => error.set(Some(err.to_string())),
@@ -383,9 +392,29 @@ pub fn BuyForm() -> Element {
 
     if let Some(total) = submitted_total() {
         return rsx! {
-            div { class: "p-8 max-w-2xl",
-                h1 { class: "text-2xl font-semibold m-0 mb-4", "Log buy" }
+            div { class: "p-8 flex flex-col gap-4 max-w-2xl",
+                h1 { class: "text-2xl font-semibold m-0", "Log buy" }
                 p { class: "text-gain m-0", "Bought - total cost basis {money(total)}." }
+                // Only ever shown on the "existing card" path - see
+                // `submitted_holding_id`'s own doc comment for why "new
+                // card" doesn't get this yet. Optional and skippable by
+                // simply not interacting with it, same as everything
+                // else on this page - never a blocking step in the
+                // celebratory "just bought this" moment.
+                if let Some(holding_id) = submitted_holding_id() {
+                    div { class: "flex flex-col gap-2 mt-2",
+                        PhotoCapture {
+                            key: "{holding_id}",
+                            holding_id,
+                            on_uploaded: move |_| {},
+                        }
+                        Link {
+                            to: Route::HoldingDetailRoute { id: holding_id },
+                            class: "text-gold text-sm no-underline",
+                            "View card"
+                        }
+                    }
+                }
             }
         };
     }
