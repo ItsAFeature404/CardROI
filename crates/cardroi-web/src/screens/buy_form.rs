@@ -13,12 +13,14 @@
 
 use cardroi::db::repository::{AcquisitionImportRow, Repository};
 use cardroi::error::Result as CardRoiResult;
-use cardroi::models::{Money, NewCard, NewHolding, NewSet, NewTransaction, TransactionType};
+use cardroi::models::{
+    HoldingImage, Money, NewCard, NewHolding, NewSet, NewTransaction, TransactionType,
+};
 use chrono::NaiveDate;
 use dioxus::prelude::*;
 
 use crate::components::form_field::FormField;
-use crate::components::photo::PhotoCapture;
+use crate::components::photo::{PhotoCapture, PhotoGallery};
 use crate::routes::Route;
 use crate::screens::format::money;
 use crate::web_bridge::WebBridge;
@@ -312,6 +314,26 @@ pub fn BuyForm() -> Element {
     // `cardroi import`. A card bought via "new card" still gets its photo
     // added afterward on Card Details, which already fully supports it.
     let mut submitted_holding_id = use_signal(|| None::<i64>);
+    // What PhotoCapture/PhotoGallery actually display on the success
+    // screen - reloaded from the real repository after every upload/
+    // delete/reorder rather than hand-maintained locally, so this view
+    // can never drift from what's actually stored.
+    let mut bought_photos = use_signal(Vec::<HoldingImage>::new);
+    let reload_bought_photos = {
+        let bridge = bridge.clone();
+        move || {
+            let bridge = bridge.clone();
+            spawn(async move {
+                if let Some(holding_id) = submitted_holding_id() {
+                    let photos = bridge
+                        .run(move |repo| repo.list_photos_for_holding(holding_id))
+                        .await
+                        .unwrap_or_default();
+                    bought_photos.set(photos);
+                }
+            });
+        }
+    };
 
     let acquisition_inputs = move || AcquisitionInputs {
         price: price_input(),
@@ -402,11 +424,25 @@ pub fn BuyForm() -> Element {
                 // else on this page - never a blocking step in the
                 // celebratory "just bought this" moment.
                 if let Some(holding_id) = submitted_holding_id() {
-                    div { class: "flex flex-col gap-2 mt-2",
+                    div { class: "flex flex-col gap-3 mt-2",
+                        if !bought_photos().is_empty() {
+                            PhotoGallery {
+                                key: "{holding_id}",
+                                holding_id,
+                                photos: bought_photos(),
+                                on_changed: {
+                                    let reload_bought_photos = reload_bought_photos.clone();
+                                    move |_| reload_bought_photos()
+                                },
+                            }
+                        }
                         PhotoCapture {
                             key: "{holding_id}",
                             holding_id,
-                            on_uploaded: move |_| {},
+                            on_uploaded: {
+                                let reload_bought_photos = reload_bought_photos.clone();
+                                move |_| reload_bought_photos()
+                            },
                         }
                         Link {
                             to: Route::HoldingDetailRoute { id: holding_id },

@@ -13,9 +13,13 @@
 //! browser and can only be confirmed by hand on a real phone, not by any
 //! automated test.
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use cardroi::db::repository::PhotoStorage;
 use cardroi::models::HoldingImage;
 use dioxus::prelude::*;
+use dioxus_free_icons::Icon;
+use dioxus_free_icons::icons::ld_icons::LdX;
 
 use crate::web_bridge::WebBridge;
 
@@ -24,9 +28,8 @@ use crate::web_bridge::WebBridge;
 /// a second overlapping request. Every upload appends a new photo -
 /// `add_photo`'s own existing logic already makes the first upload for a
 /// holding primary and every later one non-primary, so this needs no
-/// caller-side special-casing; a real gallery (`PhotoGallery` on Card
-/// Details) is where a collector manages which one is primary or removes
-/// one, not this control.
+/// caller-side special-casing; `PhotoGallery` below is where a collector
+/// manages which one is primary or removes one, not this control.
 #[component]
 pub fn PhotoCapture(holding_id: i64, on_uploaded: EventHandler<HoldingImage>) -> Element {
     let bridge = use_context::<WebBridge>();
@@ -84,6 +87,130 @@ pub fn PhotoCapture(holding_id: i64, on_uploaded: EventHandler<HoldingImage>) ->
             }
             if let Some(err) = error() {
                 p { class: "text-loss text-sm m-0", "{err}" }
+            }
+        }
+    }
+}
+
+/// Computes the new photo order after dragging `dragged_id` onto
+/// `target_id`'s tile - removes `dragged_id` from `current`, then
+/// reinserts it right where `target_id` now sits. A pure function so the
+/// actual reorder math is testable without a DOM/drag event at all.
+/// Dragging a tile onto itself is a no-op, not an append-to-the-end bug.
+fn reorder_ids(current: &[i64], dragged_id: i64, target_id: i64) -> Vec<i64> {
+    if dragged_id == target_id {
+        return current.to_vec();
+    }
+    let mut ids: Vec<i64> = current
+        .iter()
+        .copied()
+        .filter(|&id| id != dragged_id)
+        .collect();
+    let target_index = ids
+        .iter()
+        .position(|&id| id == target_id)
+        .unwrap_or(ids.len());
+    ids.insert(target_index, dragged_id);
+    ids
+}
+
+/// Every photo on a holding, as a small grid of tiles - used both on Card
+/// Details (under its edit-mode toggle, alongside `PhotoCapture`) and
+/// right on the Buy success screen (so a photo added at Buy-time is
+/// actually visible and removable there, not just added into the void).
+/// Each tile: drag to reorder (native HTML5 drag-and-drop, no
+/// third-party crate - Dioxus 0.7 wires `ondragstart`/`ondragover`/
+/// `ondrop` straight to the real DOM on web), click a non-primary tile
+/// to make it primary, hover to reveal a delete-X.
+#[component]
+pub fn PhotoGallery(
+    holding_id: i64,
+    photos: Vec<HoldingImage>,
+    on_changed: EventHandler<()>,
+) -> Element {
+    let bridge = use_context::<WebBridge>();
+    let mut dragging_id = use_signal(|| None::<i64>);
+    let ids: Vec<i64> = photos.iter().map(|p| p.id).collect();
+
+    rsx! {
+        div { class: "flex flex-wrap gap-2",
+            for photo in photos.iter().cloned() {
+                div {
+                    key: "{photo.id}",
+                    class: if photo.is_primary {
+                        "group relative w-16 h-16 shrink-0 rounded-lg overflow-hidden ring-2 ring-gold cursor-grab"
+                    } else {
+                        "group relative w-16 h-16 shrink-0 rounded-lg overflow-hidden cursor-grab"
+                    },
+                    draggable: "true",
+                    ondragstart: {
+                        let photo_id = photo.id;
+                        move |_| dragging_id.set(Some(photo_id))
+                    },
+                    ondragover: move |evt| evt.prevent_default(),
+                    ondrop: {
+                        let bridge = bridge.clone();
+                        let ids = ids.clone();
+                        let target_id = photo.id;
+                        move |_| {
+                            let Some(dragged_id) = dragging_id() else {
+                                return;
+                            };
+                            dragging_id.set(None);
+                            if dragged_id == target_id {
+                                return;
+                            }
+                            let bridge = bridge.clone();
+                            let new_order = reorder_ids(&ids, dragged_id, target_id);
+                            spawn(async move {
+                                let _ = bridge
+                                    .run(move |repo| repo.reorder_photos(holding_id, &new_order))
+                                    .await;
+                                on_changed.call(());
+                            });
+                        }
+                    },
+                    onclick: {
+                        let bridge = bridge.clone();
+                        let photo_id = photo.id;
+                        let is_primary = photo.is_primary;
+                        move |_| {
+                            if is_primary {
+                                return;
+                            }
+                            let bridge = bridge.clone();
+                            spawn(async move {
+                                let _ = bridge
+                                    .run(move |repo| repo.set_primary_photo(holding_id, photo_id))
+                                    .await;
+                                on_changed.call(());
+                            });
+                        }
+                    },
+                    img {
+                        class: "w-full h-full object-cover pointer-events-none",
+                        src: "data:image/jpeg;base64,{BASE64.encode(&photo.thumbnail_data)}",
+                    }
+                    button {
+                        class: "absolute top-0.5 right-0.5 w-5 h-5 flex items-center justify-center rounded-full bg-canvas/70 text-text-tertiary opacity-0 group-hover:opacity-100 border-none cursor-pointer transition-opacity duration-[var(--duration-standard)] ease-standard hover:text-loss",
+                        "aria-label": "Remove photo",
+                        onclick: {
+                            let bridge = bridge.clone();
+                            let photo_id = photo.id;
+                            move |evt: MouseEvent| {
+                                evt.stop_propagation();
+                                let bridge = bridge.clone();
+                                spawn(async move {
+                                    let _ = bridge
+                                        .run(move |repo| repo.delete_photo(photo_id, PhotoStorage::Inline))
+                                        .await;
+                                    on_changed.call(());
+                                });
+                            }
+                        },
+                        Icon { icon: LdX, width: 12, height: 12 }
+                    }
+                }
             }
         }
     }
@@ -165,5 +292,17 @@ mod tests {
             .expect("inline storage must populate full_data");
         assert!(!full_data.is_empty());
         assert!(!photo.thumbnail_data.is_empty());
+    }
+
+    #[wasm_bindgen_test]
+    fn reorder_ids_moves_the_dragged_id_to_the_target_and_closes_the_gap() {
+        assert_eq!(reorder_ids(&[1, 2, 3], 1, 3), vec![2, 1, 3]);
+        assert_eq!(reorder_ids(&[1, 2, 3], 3, 1), vec![3, 1, 2]);
+        assert_eq!(reorder_ids(&[1, 2, 3, 4], 4, 2), vec![1, 4, 2, 3]);
+    }
+
+    #[wasm_bindgen_test]
+    fn reorder_ids_dropping_a_tile_onto_itself_is_a_no_op() {
+        assert_eq!(reorder_ids(&[1, 2, 3], 2, 2), vec![1, 2, 3]);
     }
 }
