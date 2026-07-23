@@ -6,31 +6,35 @@
 //! Details already owns emotional (one ownership's story); this screen
 //! owns effective.
 //!
-//! Search and the capture actions (Buy/Sell/Comp) are deliberately one
-//! visual unit, not two - both are just ways to begin work. Below that,
-//! exactly three named blocks, in this order and no others: **Since you
-//! last opened** (what actually happened - a new addition, a genuine
-//! gain, a comp gone stale), **Collection Health** (is this collection
-//! in good shape, not what's it worth - the dollar figure survives only
-//! as a demoted, tiny-text line), **Workbench** (task-phrased, not
-//! navigation - what's worth doing about it, named for what CardROI
-//! actually is). "Go deeper" needs no content of its own here at all,
-//! since the persistent nav already does that job on every screen. No
-//! sentence here merely announces the block beneath it - a section's own
-//! label and the items inside it carry that job instead.
+//! "Where was I" before "what can I do": **Since you last opened**
+//! (what actually happened - a new addition, a genuine gain, a comp
+//! gone stale) renders directly under the greeting, before a single
+//! pixel of tooling - orientation earns the first look, not the second.
+//! Only then the Action Center: search and the capture actions
+//! (Buy/Sell/Comp) are deliberately one visual unit, not two - both are
+//! just ways to begin work. Below that, **Collection** (the honest
+//! snapshot - value, unrealized P&L, pricing coverage - deliberately
+//! *not* relabeled "Health": that word promises organizational
+//! judgment - duplicates, missing grades, reviewed purchases - none of
+//! which this data model tracks; a pricing-coverage line wearing a
+//! bigger word than it's earned is worse than the plain one), and
+//! **Workbench** (task-phrased, not navigation - what's worth doing
+//! about it, named for what CardROI actually is). "Go deeper" needs no
+//! content of its own here at all, since the persistent nav already
+//! does that job on every screen. No sentence here merely announces the
+//! block beneath it - a section's own label and the items inside it
+//! carry that job instead.
 //!
 //! Deliberately not competing with the portfolio-dashboard genre
 //! (Collectr, Card Ladder) that leads with trending/most-valuable/
 //! biggest-movers charts - CardROI isn't trying to predict prices, it's
 //! trying to help a collector remember, organize, and decide well.
-//! Collection Health's one signal today is pricing readiness, reusing
-//! `AttentionStatus` - not "duplicates" or "purchases reviewed," neither
-//! of which this data model tracks yet; faking either would mean
-//! inventing a signal the collector never recorded (see this project's
-//! honesty principle) or a naive heuristic that misfires on completely
+//! Real duplicate detection and purchase-review tracking are future
+//! features with their own design questions (what counts as a
+//! duplicate, can a collector dismiss a flagged pair), not something to
+//! fake here with a naive heuristic that would misfire on completely
 //! normal collecting (owning two raw copies of the same card on
-//! purpose isn't a "duplicate risk"). Real duplicate detection is a
-//! future feature with its own design questions, not a line item here.
+//! purpose isn't a "duplicate risk").
 //!
 //! This screen's emotional space stays orientation only - it never
 //! delivers hard news. The notable-mover line is deliberately
@@ -464,18 +468,11 @@ fn DashboardBody(data: DashboardData) -> Element {
         || data.notable_mover.is_some()
         || !matches!(data.needs_attention, AttentionStatus::AllFresh);
 
-    // Collection Health's one honest signal today: pricing readiness,
-    // reusing `AttentionStatus` rather than a separate check. Deliberately
-    // not "0 duplicates" or "all purchases reviewed" - neither concept
-    // exists anywhere in this data model yet, and faking either would
-    // mean either inventing a signal the collector never recorded, or a
-    // naive duplicate heuristic that would misfire on a completely normal
-    // pattern (a set-builder owning two raw copies of the same card on
-    // purpose). Real duplicate detection is a future feature with its own
-    // design questions (what counts, can a collector dismiss a flagged
-    // pair), not a line item to bolt on here.
-    let health_ready = matches!(data.needs_attention, AttentionStatus::AllFresh);
-    let health_line = match data.needs_attention {
+    // Collection's compact pricing-coverage line, reusing `AttentionStatus`
+    // rather than a separate check - a plainer restatement of
+    // `attention_line` for a checklist row instead of a full sentence.
+    let coverage_fresh = matches!(data.needs_attention, AttentionStatus::AllFresh);
+    let coverage_line = match data.needs_attention {
         AttentionStatus::AllFresh => "Research current".to_string(),
         AttentionStatus::NonePricedYet => "No cards priced yet".to_string(),
         AttentionStatus::NeedsComps { count: 1 } => "1 card needs fresh research".to_string(),
@@ -509,58 +506,9 @@ fn DashboardBody(data: DashboardData) -> Element {
                 NamePrompt { on_done: on_name_done }
             }
 
-            // The Action Center: search and capture are both just ways
-            // to begin work, so they're one visual unit, not two - the
-            // hero of the page in the sense of friction-free action,
-            // never a card or a number.
-            div { class: "rounded-[20px] bg-surface p-6 flex flex-col gap-4",
-                div {
-                    input {
-                        class: "bg-canvas text-text-primary border border-border rounded-radius px-3 py-2 font-data w-full",
-                        placeholder: "Search your collection...",
-                        value: "{search_query}",
-                        oninput: move |evt| search_query.set(evt.value()),
-                    }
-                    if let Some(matches) = &search_matches {
-                        div { class: "flex flex-col mt-2", style: "max-height: 240px; overflow-y: auto;",
-                            if matches.is_empty() {
-                                p { class: "text-text-secondary text-sm m-0 mt-1", "No matches." }
-                            } else {
-                                for option in matches.iter().cloned() {
-                                    Link {
-                                        key: "{option.holding_id}",
-                                        to: Route::HoldingDetailRoute { id: option.holding_id },
-                                        class: "flex justify-between items-center px-2 py-1.5 rounded-radius no-underline text-text-primary hover:bg-surface-elevated",
-                                        span { "{option.label}" }
-                                        span { class: "text-text-tertiary text-xs", "{option.status.as_str()}" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                div { class: "flex gap-2 flex-wrap pt-2 border-t border-border",
-                    Link {
-                        to: Route::BuyRoute {},
-                        class: "px-4 py-2 rounded-radius bg-surface-elevated text-text-primary border border-border no-underline font-semibold cursor-pointer hover:bg-gold hover:text-canvas hover:border-transparent transition-colors duration-[var(--duration-standard)] ease-standard",
-                        "Log Buy"
-                    }
-                    Link {
-                        to: Route::SellRoute {},
-                        class: "px-4 py-2 rounded-radius bg-surface-elevated text-text-primary border border-border no-underline font-semibold cursor-pointer hover:bg-gold hover:text-canvas hover:border-transparent transition-colors duration-[var(--duration-standard)] ease-standard",
-                        "Log Sell"
-                    }
-                    Link {
-                        to: Route::CompRoute {},
-                        class: "px-4 py-2 rounded-radius bg-surface-elevated text-text-primary border border-border no-underline font-semibold cursor-pointer hover:bg-gold hover:text-canvas hover:border-transparent transition-colors duration-[var(--duration-standard)] ease-standard",
-                        "Add Comp"
-                    }
-                }
-            }
-
-            // "Since you last opened": what actually happened, as a
-            // short list of items - not a sentence explaining what's
-            // below. A genuine gain earns its own labeled line
+            // "Since you last opened" comes before a single pixel of
+            // tooling - "where was I" earns the first look, not the
+            // Action Center. A genuine gain earns its own labeled line
             // ("Largest gain") rather than a folded-in clause; it's
             // something to enjoy, never a task, so it appears here and
             // nowhere else.
@@ -596,23 +544,88 @@ fn DashboardBody(data: DashboardData) -> Element {
                 }
             }
 
-            // "Collection Health": is this collection in good shape, not
-            // "what's it worth" - CardROI isn't a portfolio tracker
-            // competing on live pricing, it's the place a collector comes
-            // to know what needs attention. The dollar figure is real and
-            // stays, demoted to a single tiny muted line underneath
-            // rather than leading the block.
+            // The Action Center: search and capture are both just ways
+            // to begin work, so they're one visual unit, not two. The
+            // input is deliberately quiet (a plain field, not a button-
+            // styled box) - a match is the point of searching, not the
+            // box that got you there, so the first result renders as the
+            // prominent thing: bigger text, its own "Open" affordance.
+            // Remaining matches stay compact underneath.
+            div { class: "rounded-[20px] bg-surface p-6 flex flex-col gap-4",
+                div {
+                    input {
+                        class: "bg-canvas text-text-primary border border-border rounded-radius px-3 py-1.5 text-sm font-data w-full",
+                        placeholder: "Search your collection...",
+                        value: "{search_query}",
+                        oninput: move |evt| search_query.set(evt.value()),
+                    }
+                    if let Some(matches) = &search_matches {
+                        if let Some((first, rest)) = matches.split_first() {
+                            div { class: "flex flex-col gap-1 mt-3",
+                                Link {
+                                    key: "{first.holding_id}",
+                                    to: Route::HoldingDetailRoute { id: first.holding_id },
+                                    class: "flex items-center justify-between px-3 py-2.5 rounded-radius no-underline bg-surface-elevated hover:bg-canvas transition-colors duration-[var(--duration-standard)] ease-standard",
+                                    div { class: "flex flex-col",
+                                        span { class: "text-text-primary font-semibold", "{first.label}" }
+                                        span { class: "text-text-tertiary text-xs", "{first.status.as_str()}" }
+                                    }
+                                    span { class: "text-gold text-sm font-semibold", "Open →" }
+                                }
+                                if !rest.is_empty() {
+                                    div { class: "flex flex-col mt-1", style: "max-height: 180px; overflow-y: auto;",
+                                        for option in rest.iter().cloned() {
+                                            Link {
+                                                key: "{option.holding_id}",
+                                                to: Route::HoldingDetailRoute { id: option.holding_id },
+                                                class: "flex justify-between items-center px-2 py-1 rounded-radius no-underline text-text-secondary text-sm hover:bg-surface-elevated",
+                                                span { "{option.label}" }
+                                                span { class: "text-text-tertiary text-xs", "{option.status.as_str()}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            p { class: "text-text-secondary text-sm m-0 mt-2", "No matches." }
+                        }
+                    }
+                }
+                div { class: "flex gap-2 flex-wrap pt-2 border-t border-border",
+                    Link {
+                        to: Route::BuyRoute {},
+                        class: "px-4 py-2 rounded-radius bg-surface-elevated text-text-primary border border-border no-underline font-semibold cursor-pointer hover:bg-gold hover:text-canvas hover:border-transparent transition-colors duration-[var(--duration-standard)] ease-standard",
+                        "Log Buy"
+                    }
+                    Link {
+                        to: Route::SellRoute {},
+                        class: "px-4 py-2 rounded-radius bg-surface-elevated text-text-primary border border-border no-underline font-semibold cursor-pointer hover:bg-gold hover:text-canvas hover:border-transparent transition-colors duration-[var(--duration-standard)] ease-standard",
+                        "Log Sell"
+                    }
+                    Link {
+                        to: Route::CompRoute {},
+                        class: "px-4 py-2 rounded-radius bg-surface-elevated text-text-primary border border-border no-underline font-semibold cursor-pointer hover:bg-gold hover:text-canvas hover:border-transparent transition-colors duration-[var(--duration-standard)] ease-standard",
+                        "Add Comp"
+                    }
+                }
+            }
+
+            // "Collection": the honest snapshot - pricing coverage,
+            // then value/unrealized P&L demoted to a single tiny muted
+            // line underneath. Not "Health" - that word promises
+            // organizational judgment (duplicates, missing grades,
+            // reviewed purchases) this data model doesn't track.
             div { class: "flex flex-col gap-2",
                 p { class: "text-text-tertiary text-xs font-semibold uppercase tracking-wide m-0",
-                    "Collection Health"
+                    "Collection"
                 }
                 div { class: "flex items-center gap-2 text-sm",
-                    if health_ready {
+                    if coverage_fresh {
                         Icon { icon: LdCircleCheckBig, width: 16, height: 16, class: "text-gain shrink-0" }
                     } else {
                         Icon { icon: LdTriangleAlert, width: 16, height: 16, class: "text-text-tertiary shrink-0" }
                     }
-                    span { "{health_line}" }
+                    span { "{coverage_line}" }
                 }
                 p { class: "text-text-tertiary text-xs m-0",
                     "{money(total_value)} - {sign}{money(total_pnl)} unrealized, based on your recorded comps"

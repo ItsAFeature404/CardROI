@@ -577,6 +577,9 @@
   .py-2 {
     padding-block: calc(var(--spacing) * 2);
   }
+  .py-2\.5 {
+    padding-block: calc(var(--spacing) * 2.5);
+  }
   .py-3 {
     padding-block: calc(var(--spacing) * 3);
   }
@@ -725,6 +728,9 @@
   @media (hover: hover) {
     .hover\:border-transparent:hover {
       border-color: transparent;
+    }
+    .hover\:bg-canvas:hover {
+      background-color: var(--color-canvas);
     }
     .hover\:bg-gold:hover {
       background-color: var(--color-gold);
