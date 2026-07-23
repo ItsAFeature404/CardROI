@@ -10,13 +10,27 @@
 //! visual unit, not two - both are just ways to begin work. Below that,
 //! exactly three named blocks, in this order and no others: **Since you
 //! last opened** (what actually happened - a new addition, a genuine
-//! gain, a comp gone stale), **Collection** (the quiet snapshot - value,
-//! unrealized P&L, coverage), **Suggested next** (task-phrased, not
-//! navigation - what's worth doing about it). "Go deeper" needs no
-//! content of its own here at all, since the persistent nav already
-//! does that job on every screen. No sentence here merely announces the
-//! block beneath it - a section's own label and the items inside it
-//! carry that job instead.
+//! gain, a comp gone stale), **Collection Health** (is this collection
+//! in good shape, not what's it worth - the dollar figure survives only
+//! as a demoted, tiny-text line), **Workbench** (task-phrased, not
+//! navigation - what's worth doing about it, named for what CardROI
+//! actually is). "Go deeper" needs no content of its own here at all,
+//! since the persistent nav already does that job on every screen. No
+//! sentence here merely announces the block beneath it - a section's own
+//! label and the items inside it carry that job instead.
+//!
+//! Deliberately not competing with the portfolio-dashboard genre
+//! (Collectr, Card Ladder) that leads with trending/most-valuable/
+//! biggest-movers charts - CardROI isn't trying to predict prices, it's
+//! trying to help a collector remember, organize, and decide well.
+//! Collection Health's one signal today is pricing readiness, reusing
+//! `AttentionStatus` - not "duplicates" or "purchases reviewed," neither
+//! of which this data model tracks yet; faking either would mean
+//! inventing a signal the collector never recorded (see this project's
+//! honesty principle) or a naive heuristic that misfires on completely
+//! normal collecting (owning two raw copies of the same card on
+//! purpose isn't a "duplicate risk"). Real duplicate detection is a
+//! future feature with its own design questions, not a line item here.
 //!
 //! This screen's emotional space stays orientation only - it never
 //! delivers hard news. The notable-mover line is deliberately
@@ -431,9 +445,7 @@ fn DashboardBody(data: DashboardData) -> Element {
     let rollup = &data.rollup;
     let total_value = rollup.open_cost_basis + rollup.unrealized_pnl;
     let total_pnl = rollup.realized_pnl + rollup.unrealized_pnl;
-    let open_count = rollup.holding_count - rollup.closed_count;
     let is_gain = !total_pnl.is_negative();
-    let pnl_class = if is_gain { "text-gain" } else { "text-loss" };
     let sign = if is_gain && !total_pnl.is_zero() {
         "+"
     } else {
@@ -451,6 +463,24 @@ fn DashboardBody(data: DashboardData) -> Element {
     let has_news = data.newest_addition.is_some()
         || data.notable_mover.is_some()
         || !matches!(data.needs_attention, AttentionStatus::AllFresh);
+
+    // Collection Health's one honest signal today: pricing readiness,
+    // reusing `AttentionStatus` rather than a separate check. Deliberately
+    // not "0 duplicates" or "all purchases reviewed" - neither concept
+    // exists anywhere in this data model yet, and faking either would
+    // mean either inventing a signal the collector never recorded, or a
+    // naive duplicate heuristic that would misfire on a completely normal
+    // pattern (a set-builder owning two raw copies of the same card on
+    // purpose). Real duplicate detection is a future feature with its own
+    // design questions (what counts, can a collector dismiss a flagged
+    // pair), not a line item to bolt on here.
+    let health_ready = matches!(data.needs_attention, AttentionStatus::AllFresh);
+    let health_line = match data.needs_attention {
+        AttentionStatus::AllFresh => "Research current".to_string(),
+        AttentionStatus::NonePricedYet => "No cards priced yet".to_string(),
+        AttentionStatus::NeedsComps { count: 1 } => "1 card needs fresh research".to_string(),
+        AttentionStatus::NeedsComps { count } => format!("{count} cards need fresh research"),
+    };
 
     // Only computed once there's an actual query - an idle search box
     // shouldn't force a render pass over the whole holding list.
@@ -566,32 +596,36 @@ fn DashboardBody(data: DashboardData) -> Element {
                 }
             }
 
-            // "Collection": the quiet snapshot - two numbers, then
-            // coverage as tiny muted text underneath, never competing
-            // with "since you last opened" for the eye.
-            div { class: "flex flex-col gap-1",
+            // "Collection Health": is this collection in good shape, not
+            // "what's it worth" - CardROI isn't a portfolio tracker
+            // competing on live pricing, it's the place a collector comes
+            // to know what needs attention. The dollar figure is real and
+            // stays, demoted to a single tiny muted line underneath
+            // rather than leading the block.
+            div { class: "flex flex-col gap-2",
                 p { class: "text-text-tertiary text-xs font-semibold uppercase tracking-wide m-0",
-                    "Collection"
+                    "Collection Health"
                 }
-                p { class: "data-numeral text-3xl m-0 text-text-primary", "{money(total_value)}" }
-                p { class: "data-numeral text-sm m-0 {pnl_class}", "{sign}{money(total_pnl)} unrealized" }
-                p { class: "text-text-tertiary text-xs m-0 mt-1",
-                    "Based on your latest recorded research"
-                }
-                if rollup.appraised_open_count < open_count {
-                    p { class: "text-text-tertiary text-xs m-0",
-                        "{open_count} holdings - {rollup.appraised_open_count}/{open_count} priced"
+                div { class: "flex items-center gap-2 text-sm",
+                    if health_ready {
+                        Icon { icon: LdCircleCheckBig, width: 16, height: 16, class: "text-gain shrink-0" }
+                    } else {
+                        Icon { icon: LdTriangleAlert, width: 16, height: 16, class: "text-text-tertiary shrink-0" }
                     }
-                } else {
-                    p { class: "text-text-tertiary text-xs m-0", "{open_count} holdings, fully priced" }
+                    span { "{health_line}" }
+                }
+                p { class: "text-text-tertiary text-xs m-0",
+                    "{money(total_value)} - {sign}{money(total_pnl)} unrealized, based on your recorded comps"
                 }
             }
 
-            // "Suggested next": task-phrased, not navigation - each row
-            // reads as work worth doing, not a link to somewhere else.
+            // "Workbench": task-phrased, not navigation - each row reads
+            // as work worth doing, not a link to somewhere else. Named
+            // for what CardROI actually is: a trusted workbench for a
+            // collection, not a stock-portfolio dashboard.
             div { class: "flex flex-col gap-2",
                 p { class: "text-text-tertiary text-xs font-semibold uppercase tracking-wide m-0",
-                    "Suggested next"
+                    "Workbench"
                 }
                 div { class: "flex flex-col gap-1",
                     for action in data.next_actions.iter().cloned() {

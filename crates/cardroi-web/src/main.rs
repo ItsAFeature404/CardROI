@@ -32,6 +32,7 @@ fn App() -> Element {
     let bridge = use_resource(WebBridge::open);
 
     rsx! {
+        document::Title { "CardROI" }
         document::Stylesheet { href: TAILWIND_CSS }
         match &*bridge.read() {
             None => rsx! {

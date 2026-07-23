@@ -13,6 +13,13 @@
 //! bottom bar instead - the bottom bar's 5 destinations plus 2 actions is
 //! past where a bottom bar stays usable as tappable tabs, so the actions
 //! get their own affordance rather than competing for the same row.
+//!
+//! The desktop sidebar carries this app's one wordmark, in `font-brand` -
+//! before this, nothing in the running app said "CardROI" anywhere (the
+//! browser tab didn't either, see `main.rs`'s `document::Title`).
+//! Deliberately not repeated on the mobile bottom bar too: a persistent
+//! top bar would cost real vertical space on a phone screen for a fix
+//! that already reaches every screen once, here.
 
 use crate::routes::Route;
 use dioxus::prelude::*;
@@ -29,6 +36,7 @@ pub fn Shell() -> Element {
 
             nav {
                 class: "hidden md:flex w-56 shrink-0 bg-surface border-r border-border flex-col p-4 gap-1",
+                p { class: "font-brand text-xl text-text-primary px-3 mb-3", "CardROI" }
                 SidebarLink { to: Route::DashboardRoute {}, label: "Dashboard",
                     Icon { icon: LdLayoutDashboard, width: 20, height: 20 }
                 }
