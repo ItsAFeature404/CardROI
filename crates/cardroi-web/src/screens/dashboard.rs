@@ -500,7 +500,7 @@ fn DashboardBody(data: DashboardData) -> Element {
     };
 
     rsx! {
-        div { class: "p-8 flex flex-col gap-8 max-w-2xl",
+        div { class: "p-8 flex flex-col gap-8 max-w-2xl animate-settle-in",
             p { class: "data-numeral text-2xl m-0", "{greeting}" }
             if show_name_prompt() {
                 NamePrompt { on_done: on_name_done }
