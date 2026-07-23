@@ -33,7 +33,7 @@ fn missing_db_path_is_created_and_migrated_on_first_run() {
     let version: u32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6, "all migrations should have run");
+    assert_eq!(version, 7, "all migrations should have run");
 }
 
 #[test]

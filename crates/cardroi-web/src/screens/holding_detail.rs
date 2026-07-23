@@ -1,9 +1,10 @@
 //! The holding drill-down page: full transaction history, comp history,
 //! and realized/unrealized P&L for one holding - the GUI analog of
 //! `cardroi holding show` + `cardroi roi --holding-id` + `cardroi comp
-//! list` combined into one view. No photo gallery: card photos depend on
-//! filesystem-backed storage, and photo capture is explicitly out of
-//! scope for a browser tab.
+//! list` combined into one view. One photo per holding (not a gallery -
+//! the repository supports many, this page shows/replaces one), uploaded
+//! via `PhotoStorage::Inline` since this crate has no filesystem to write
+//! a disk-backed photo to (see `components::photo::PhotoCapture`).
 //!
 //! What-If (a "simulate selling this" form, not a top-level nav item) and
 //! Mark Lost/Damaged both live here rather than on the Buy/Sell/Comp
@@ -21,20 +22,23 @@
 //! `CardRoiResult` directly - no double-`Result` unwrapping anywhere in
 //! this file.
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use cardroi::analytics::roi::{self, HoldingPnl};
 use cardroi::analytics::whatif::{self, HypotheticalSale, PriceSource, WhatIfResult};
 use cardroi::db::repository::Repository;
 use cardroi::error::Result as CardRoiResult;
 use cardroi::models::{
-    Appraisal, Holding, HoldingEdit, HoldingStatus, Money, Transaction, TransactionEdit,
-    TransactionType,
+    Appraisal, Holding, HoldingEdit, HoldingImage, HoldingStatus, Money, Transaction,
+    TransactionEdit, TransactionType,
 };
 use chrono::{NaiveDate, Utc};
 use dioxus::prelude::*;
 use dioxus_free_icons::Icon;
-use dioxus_free_icons::icons::ld_icons::LdPencil;
+use dioxus_free_icons::icons::ld_icons::{LdImage, LdPencil};
 
 use crate::components::form_field::FormField;
+use crate::components::photo::PhotoCapture;
 use crate::web_bridge::WebBridge;
 
 use super::format::{date, duration_phrase, money, parse_date, percent};
@@ -213,6 +217,10 @@ struct HoldingDetailData {
     // `appraisals` has no equivalent need (comps have no edit form
     // anywhere in this app) and isn't kept.
     transactions: Vec<Transaction>,
+    /// The primary photo, if one's been added - `list_photos_for_holding`
+    /// already orders primary-first, so `.next()` is enough; no second
+    /// query or sort needed.
+    primary_photo: Option<HoldingImage>,
 }
 
 fn load_holding_detail(holding_id: i64, repo: &Repository) -> CardRoiResult<HoldingDetailData> {
@@ -224,6 +232,7 @@ fn load_holding_detail(holding_id: i64, repo: &Repository) -> CardRoiResult<Hold
     let appraisals = repo.list_appraisals_for_holding(holding_id)?;
     let timeline = build_timeline(&transactions, &appraisals);
     let ownership_duration_days = ownership_duration_days(&holding, Utc::now().date_naive());
+    let primary_photo = repo.list_photos_for_holding(holding_id)?.into_iter().next();
 
     Ok(HoldingDetailData {
         card_name: card.display_name(),
@@ -234,6 +243,7 @@ fn load_holding_detail(holding_id: i64, repo: &Repository) -> CardRoiResult<Hold
         pnl,
         timeline,
         transactions,
+        primary_photo,
     })
 }
 
@@ -301,33 +311,51 @@ fn HoldingDetailBody(
                     },
                     Icon { icon: LdPencil, width: 16, height: 16 }
                 }
-                h1 { class: "font-brand text-4xl m-0 pr-10", "{detail.card_name}" }
-                p { class: "text-text-secondary text-sm mt-2 mb-0", "{detail.set_name}" }
-                div { class: "flex flex-wrap gap-3 mt-4",
-                    if let Some(serial) = &detail.holding.serial_number {
-                        span { class: "px-2.5 py-1 rounded-[10px] bg-surface-elevated text-text-secondary text-xs font-data", "#{serial}" }
+                div { class: "flex gap-4 items-start",
+                    // A fixed-size slot regardless of whether a photo
+                    // exists yet, so adding one later never reshuffles
+                    // the hero's geometry.
+                    div { class: "w-32 h-32 shrink-0 rounded-2xl overflow-hidden bg-surface-elevated flex items-center justify-center",
+                        if let Some(photo) = &detail.primary_photo {
+                            img {
+                                class: "w-full h-full object-cover",
+                                src: "data:image/jpeg;base64,{BASE64.encode(&photo.thumbnail_data)}",
+                                alt: "{detail.card_name}",
+                            }
+                        } else {
+                            Icon { icon: LdImage, width: 24, height: 24, class: "text-text-tertiary opacity-50" }
+                        }
                     }
-                    if let Some(grade) = &detail.holding.grade {
-                        span { class: "px-2.5 py-1 rounded-[10px] bg-gold text-canvas text-xs font-semibold",
-                            if let Some(company) = &detail.holding.grading_company {
-                                "{company} {grade}"
-                            } else {
-                                "{grade}"
+                    div { class: "flex-1 min-w-0",
+                        h1 { class: "font-brand text-4xl m-0 pr-10", "{detail.card_name}" }
+                        p { class: "text-text-secondary text-sm mt-2 mb-0", "{detail.set_name}" }
+                        div { class: "flex flex-wrap gap-3 mt-4",
+                            if let Some(serial) = &detail.holding.serial_number {
+                                span { class: "px-2.5 py-1 rounded-[10px] bg-surface-elevated text-text-secondary text-xs font-data", "#{serial}" }
+                            }
+                            if let Some(grade) = &detail.holding.grade {
+                                span { class: "px-2.5 py-1 rounded-[10px] bg-gold text-canvas text-xs font-semibold",
+                                    if let Some(company) = &detail.holding.grading_company {
+                                        "{company} {grade}"
+                                    } else {
+                                        "{grade}"
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(days) = detail.ownership_duration_days {
+                            p { class: "text-text-tertiary text-sm mt-5 mb-0",
+                                if detail.status == HoldingStatus::Owned {
+                                    "Yours for {duration_phrase(days)}"
+                                } else {
+                                    "Owned for {duration_phrase(days)}"
+                                }
                             }
                         }
                     }
                 }
-                if let Some(days) = detail.ownership_duration_days {
-                    p { class: "text-text-tertiary text-sm mt-5 mb-0",
-                        if detail.status == HoldingStatus::Owned {
-                            "Yours for {duration_phrase(days)}"
-                        } else {
-                            "Owned for {duration_phrase(days)}"
-                        }
-                    }
-                }
                 if edit_mode() {
-                    div { class: "mt-6",
+                    div { class: "mt-6 flex flex-col gap-3 items-start",
                         button {
                             class: "text-gold text-sm bg-transparent border-none cursor-pointer p-0",
                             onclick: move |_| editing_holding.set(!editing_holding()),
@@ -343,6 +371,12 @@ fn HoldingDetailBody(
                                     on_changed.call(());
                                 },
                             }
+                        }
+                        PhotoCapture {
+                            key: "{holding_id}",
+                            holding_id,
+                            current_photo_id: detail.primary_photo.as_ref().map(|p| p.id),
+                            on_uploaded: move |_| on_changed.call(()),
                         }
                     }
                 }

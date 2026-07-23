@@ -14,6 +14,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rusqlite::Connection;
 use rusqlite::types::{FromSqlError, Type};
 
+pub use holding_images::PhotoStorage;
 pub use import::{AcquisitionImportRow, ChecklistImportRow, ImportSummary};
 
 /// Thin wrapper around a [`Connection`] exposing typed CRUD and P&L queries.

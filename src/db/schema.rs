@@ -19,6 +19,7 @@ const MIGRATIONS: &[&str] = &[
     MIGRATION_0004,
     MIGRATION_0005,
     MIGRATION_0006,
+    MIGRATION_0007,
 ];
 
 const MIGRATION_0001: &str = include_str!("migrations/0001_initial.sql");
@@ -27,6 +28,7 @@ const MIGRATION_0003: &str = include_str!("migrations/0003_transaction_total_che
 const MIGRATION_0004: &str = include_str!("migrations/0004_loss_transactions.sql");
 const MIGRATION_0005: &str = include_str!("migrations/0005_composite_indexes.sql");
 const MIGRATION_0006: &str = include_str!("migrations/0006_holding_images.sql");
+const MIGRATION_0007: &str = include_str!("migrations/0007_holding_image_inline_storage.sql");
 
 /// Applies any migrations newer than the database's current `user_version`.
 pub fn migrate(conn: &mut Connection) -> Result<()> {

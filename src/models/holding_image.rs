@@ -15,8 +15,15 @@ pub struct HoldingImage {
     /// Relative to the images root (a sibling directory of wherever the
     /// database file itself resolves to) - never an absolute path, so the
     /// whole `{db file + images dir}` bundle stays portable across
-    /// machines.
-    pub file_path: String,
+    /// machines. `None` when this row's full-size bytes live in
+    /// `full_data` instead (a browser has no filesystem to write to) -
+    /// exactly one of the two is ever populated (see
+    /// `db::repository::holding_images::PhotoStorage`).
+    pub file_path: Option<String>,
+    /// The full-size, normalized JPEG bytes, populated only for a row
+    /// written without a filesystem (`cardroi-web`). `None` for every
+    /// disk-backed row - this never bloats a native/CLI row's size.
+    pub full_data: Option<Vec<u8>>,
     /// SHA-256 hex digest of the final, normalized (resized/re-encoded)
     /// bytes - used both for on-disk deduplication and as the immutable
     /// filename itself.

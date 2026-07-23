@@ -1,12 +1,14 @@
 //! Photographs of a physical card, attached to a holding. `add_photo` is
 //! the single entry point every upload path calls (the LAN phone-scan
-//! upload handler and the desktop file-picker fallback alike) - no
-//! parallel validation/resize logic between them. Full-size images are
-//! content-addressed files on disk under `images_root`; only a small
-//! thumbnail lives in the row itself (see `models::holding_image` for
-//! why). All filesystem I/O for this entity lives behind this module,
-//! same "no direct SQL/IO elsewhere" discipline as the rest of the
-//! repository layer.
+//! upload handler, the desktop file-picker fallback, and the web app's
+//! browser upload alike) - no parallel validation/resize logic between
+//! them. Full-size images are either content-addressed files on disk
+//! under an `images_root` (native/CLI) or bytes stored directly in the
+//! row (`cardroi-web`, which has no filesystem at all - see
+//! `PhotoStorage`); only a small thumbnail ever lives in the row
+//! regardless (see `models::holding_image` for why). All filesystem I/O
+//! for this entity lives behind this module, same "no direct SQL/IO
+//! elsewhere" discipline as the rest of the repository layer.
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -24,11 +26,37 @@ use super::{Repository, parse_timestamp};
 /// plenty for a "what does this card look like" record, not a studio
 /// scan; keeps on-disk size reasonable regardless of what the camera/
 /// file-picker originally handed over.
-const MAX_LONG_EDGE: u32 = 2000;
+const MAX_LONG_EDGE_DISK: u32 = 2000;
+const JPEG_QUALITY_DISK: u8 = 85;
+/// A browser has no real filesystem - the whole SQLite database (not
+/// just photos) rides inside one IndexedDB blob with no size/quota
+/// handling anywhere in `cardroi-web` today, so an inline-stored photo
+/// is capped smaller than a disk-backed one. Still plenty of resolution
+/// for "what does this card look like" reference viewing on a phone or
+/// desktop screen.
+const MAX_LONG_EDGE_INLINE: u32 = 1200;
+const JPEG_QUALITY_INLINE: u8 = 78;
 /// Thumbnail long edge - comfortably small enough to justify living as a
 /// BLOB directly in the row (see the schema migration's doc comment).
 const THUMBNAIL_LONG_EDGE: u32 = 300;
-const JPEG_QUALITY: u8 = 85;
+const THUMBNAIL_JPEG_QUALITY: u8 = 85;
+
+/// Where a photo's full-size bytes physically live - chosen by the
+/// caller, never inferred from `cfg(target_arch)` inside this module, so
+/// the same decode/resize/encode logic runs unchanged either way.
+#[derive(Clone, Copy)]
+pub enum PhotoStorage<'a> {
+    /// Native/CLI: full-size JPEG written to a content-addressed path
+    /// under this directory; only the thumbnail lives in the row.
+    Disk(&'a Path),
+    /// `cardroi-web`: no filesystem exists in a browser sandbox - the
+    /// full-size JPEG goes straight into the row's `full_data` column.
+    /// No cross-holding content dedup here (unlike `Disk`, which shares
+    /// one file across identical uploads) - v1 wasm scope is one photo
+    /// per holding, so a hypothetical duplicate upload's extra bytes
+    /// aren't worth the added complexity.
+    Inline,
+}
 
 /// Resolves the on-disk path for a content hash, sharded two levels deep
 /// by hex prefix (`ab/cd/abcd1234....jpg`) so the images directory never
@@ -42,15 +70,21 @@ fn sharded_path(images_root: &Path, hash: &str) -> PathBuf {
 
 impl Repository {
     /// Decodes, resizes/re-encodes to JPEG, hashes, thumbnails, and
-    /// stores an uploaded photo for `holding_id`. Writes the file only if
-    /// its hash isn't already on disk (dedup); the DB row is always
-    /// inserted last, so a failed write never leaves a dangling row.
+    /// stores an uploaded photo for `holding_id`. Under `PhotoStorage::Disk`,
+    /// writes the file only if its hash isn't already on disk (dedup);
+    /// the DB row is always inserted last, so a failed write never
+    /// leaves a dangling row.
     pub fn add_photo(
         &self,
         holding_id: i64,
         image_bytes: &[u8],
-        images_root: &Path,
+        storage: PhotoStorage,
     ) -> Result<HoldingImage> {
+        let (max_long_edge, jpeg_quality) = match storage {
+            PhotoStorage::Disk(_) => (MAX_LONG_EDGE_DISK, JPEG_QUALITY_DISK),
+            PhotoStorage::Inline => (MAX_LONG_EDGE_INLINE, JPEG_QUALITY_INLINE),
+        };
+
         let img = ImageReader::new(Cursor::new(image_bytes))
             .with_guessed_format()
             .map_err(|e| CardRoiError::validation(format!("couldn't read this image: {e}")))?
@@ -62,8 +96,8 @@ impl Repository {
             })?;
 
         let (orig_w, orig_h) = img.dimensions();
-        let img = if orig_w.max(orig_h) > MAX_LONG_EDGE {
-            let (w, h) = scaled_dimensions(orig_w, orig_h, MAX_LONG_EDGE);
+        let img = if orig_w.max(orig_h) > max_long_edge {
+            let (w, h) = scaled_dimensions(orig_w, orig_h, max_long_edge);
             img.resize(w, h, image::imageops::FilterType::Lanczos3)
         } else {
             img
@@ -75,35 +109,44 @@ impl Repository {
         let rgb = img.to_rgb8();
 
         let mut encoded = Vec::new();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, JPEG_QUALITY)
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, jpeg_quality)
             .write_image(rgb.as_raw(), width, height, image::ExtendedColorType::Rgb8)
             .map_err(|e| CardRoiError::validation(format!("couldn't re-encode this image: {e}")))?;
 
         let file_hash = format!("{:x}", Sha256::digest(&encoded));
-        let file_path = sharded_path(images_root, &file_hash);
-        if !file_path.exists() {
-            if let Some(parent) = file_path.parent() {
-                std::fs::create_dir_all(parent)?;
+
+        let (file_path, full_data) = match storage {
+            PhotoStorage::Disk(images_root) => {
+                let file_path = sharded_path(images_root, &file_hash);
+                if !file_path.exists() {
+                    if let Some(parent) = file_path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&file_path, &encoded)?;
+                }
+                let relative_path = file_path
+                    .strip_prefix(images_root)
+                    .unwrap_or(&file_path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                (Some(relative_path), None)
             }
-            std::fs::write(&file_path, &encoded)?;
-        }
+            PhotoStorage::Inline => (None, Some(encoded.clone())),
+        };
 
         let thumbnail = image::imageops::thumbnail(&rgb, THUMBNAIL_LONG_EDGE, THUMBNAIL_LONG_EDGE);
         let mut thumbnail_data = Vec::new();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut thumbnail_data, JPEG_QUALITY)
-            .write_image(
-                thumbnail.as_raw(),
-                thumbnail.width(),
-                thumbnail.height(),
-                image::ExtendedColorType::Rgb8,
-            )
-            .map_err(|e| CardRoiError::validation(format!("couldn't generate a thumbnail: {e}")))?;
-
-        let relative_path = file_path
-            .strip_prefix(images_root)
-            .unwrap_or(&file_path)
-            .to_string_lossy()
-            .replace('\\', "/");
+        image::codecs::jpeg::JpegEncoder::new_with_quality(
+            &mut thumbnail_data,
+            THUMBNAIL_JPEG_QUALITY,
+        )
+        .write_image(
+            thumbnail.as_raw(),
+            thumbnail.width(),
+            thumbnail.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .map_err(|e| CardRoiError::validation(format!("couldn't generate a thumbnail: {e}")))?;
 
         let next_position: i64 = self.conn.query_row(
             "SELECT COALESCE(MAX(position), -1) + 1 FROM holding_images WHERE holding_id = ?1",
@@ -119,12 +162,13 @@ impl Repository {
 
         self.conn.execute(
             "INSERT INTO holding_images (
-                holding_id, file_path, file_hash, mime_type, width, height,
+                holding_id, file_path, full_data, file_hash, mime_type, width, height,
                 file_size_bytes, is_primary, position, thumbnail_data
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 holding_id,
-                relative_path,
+                file_path,
+                full_data,
                 file_hash,
                 "image/jpeg",
                 width,
@@ -153,18 +197,34 @@ impl Repository {
             })
     }
 
-    /// Reads a photo's full-size bytes off disk (not the small in-row
-    /// thumbnail) - for an enlarged/lightbox view, where the thumbnail's
-    /// deliberately-small resolution would look blurry blown up.
-    pub fn get_photo_bytes(&self, id: i64, images_root: &Path) -> Result<Vec<u8>> {
+    /// Reads a photo's full-size bytes (not the small in-row thumbnail) -
+    /// for an enlarged/lightbox view, where the thumbnail's deliberately-
+    /// small resolution would look blurry blown up. `storage` must match
+    /// however the photo was originally written (`Disk` reads off disk,
+    /// `Inline` returns the row's own `full_data` directly).
+    pub fn get_photo_bytes(&self, id: i64, storage: PhotoStorage) -> Result<Vec<u8>> {
         let photo = self.get_photo(id)?;
-        let path = images_root.join(&photo.file_path);
-        std::fs::read(&path).map_err(|source| {
-            CardRoiError::validation(format!(
-                "couldn't read the photo file at {}: {source}",
-                path.display()
-            ))
-        })
+        match storage {
+            PhotoStorage::Disk(images_root) => {
+                let file_path = photo.file_path.as_deref().ok_or_else(|| {
+                    CardRoiError::validation(format!(
+                        "holding_image {id} has no file_path - it was stored inline, not on disk"
+                    ))
+                })?;
+                let path = images_root.join(file_path);
+                std::fs::read(&path).map_err(|source| {
+                    CardRoiError::validation(format!(
+                        "couldn't read the photo file at {}: {source}",
+                        path.display()
+                    ))
+                })
+            }
+            PhotoStorage::Inline => photo.full_data.ok_or_else(|| {
+                CardRoiError::validation(format!(
+                    "holding_image {id} has no full_data - it was stored on disk, not inline"
+                ))
+            }),
+        }
     }
 
     /// All photos for a holding, ordered for display (primary first, then
@@ -201,8 +261,10 @@ impl Repository {
     /// Deletes a single photo. If it was the primary, promotes the
     /// lowest-`position` remaining photo (if any) to primary. Unlinks the
     /// on-disk file only if no other row still references its hash -
-    /// files are content-addressed and can be shared across rows.
-    pub fn delete_photo(&self, image_id: i64, images_root: &Path) -> Result<()> {
+    /// files are content-addressed and can be shared across rows. A
+    /// no-op under `PhotoStorage::Inline` - the row's own `DELETE` above
+    /// already frees the `full_data` blob, nothing on disk to clean up.
+    pub fn delete_photo(&self, image_id: i64, storage: PhotoStorage) -> Result<()> {
         let photo = self.get_photo(image_id)?;
 
         self.conn.execute(
@@ -228,7 +290,7 @@ impl Repository {
             }
         }
 
-        self.unlink_if_unreferenced(&photo.file_hash, images_root)?;
+        self.unlink_if_unreferenced(&photo.file_hash, storage)?;
         Ok(())
     }
 
@@ -239,7 +301,7 @@ impl Repository {
     /// `ON DELETE CASCADE` (foreign keys are enabled for every
     /// connection, see `db::connection::configure`) already removes the
     /// `holding_images` rows; this just handles the filesystem side.
-    pub fn delete_holding_with_images(&self, holding_id: i64, images_root: &Path) -> Result<()> {
+    pub fn delete_holding_with_images(&self, holding_id: i64, storage: PhotoStorage) -> Result<()> {
         let hashes: Vec<String> = {
             let mut stmt = self
                 .conn
@@ -251,7 +313,7 @@ impl Repository {
         self.delete_holding(holding_id)?;
 
         for hash in hashes {
-            self.unlink_if_unreferenced(&hash, images_root)?;
+            self.unlink_if_unreferenced(&hash, storage)?;
         }
         Ok(())
     }
@@ -259,13 +321,17 @@ impl Repository {
     /// The image-cleanup-aware variant of `delete_holding_cascade` - same
     /// relationship as `delete_holding_with_images` has to plain
     /// `delete_holding`. Used by the desktop GUI (which has an
-    /// `images_root` context); `cardroi-web` has no photos at all (Scan
-    /// Card is out of scope for it) and the CLI has no GUI context to pass
-    /// one, so both call `delete_holding_cascade` directly instead.
+    /// `images_root` context) for `Disk`-backed photos; the CLI has no
+    /// GUI context to pass one, so it calls `delete_holding_cascade`
+    /// directly instead. `cardroi-web` doesn't need this variant at all,
+    /// even though it now has photos: `Inline` storage keeps a photo's
+    /// full bytes in the very row `ON DELETE CASCADE` already removes,
+    /// so plain `delete_holding_cascade` alone is enough - there's no
+    /// on-disk file left to unlink.
     pub fn delete_holding_cascade_with_images(
         &self,
         holding_id: i64,
-        images_root: &Path,
+        storage: PhotoStorage,
     ) -> Result<()> {
         let hashes: Vec<String> = {
             let mut stmt = self
@@ -278,12 +344,18 @@ impl Repository {
         self.delete_holding_cascade(holding_id)?;
 
         for hash in hashes {
-            self.unlink_if_unreferenced(&hash, images_root)?;
+            self.unlink_if_unreferenced(&hash, storage)?;
         }
         Ok(())
     }
 
-    fn unlink_if_unreferenced(&self, file_hash: &str, images_root: &Path) -> Result<()> {
+    /// A no-op under `PhotoStorage::Inline` - there's never a file on
+    /// disk to unlink in the first place.
+    fn unlink_if_unreferenced(&self, file_hash: &str, storage: PhotoStorage) -> Result<()> {
+        let images_root = match storage {
+            PhotoStorage::Disk(images_root) => images_root,
+            PhotoStorage::Inline => return Ok(()),
+        };
         let still_referenced: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM holding_images WHERE file_hash = ?1",
             params![file_hash],
@@ -316,6 +388,7 @@ fn row_to_holding_image(row: &Row) -> rusqlite::Result<HoldingImage> {
         id: row.get("id")?,
         holding_id: row.get("holding_id")?,
         file_path: row.get("file_path")?,
+        full_data: row.get("full_data")?,
         file_hash: row.get("file_hash")?,
         mime_type: row.get("mime_type")?,
         width: row.get("width")?,

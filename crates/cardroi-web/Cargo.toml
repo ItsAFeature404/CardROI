@@ -29,6 +29,11 @@ dioxus-free-icons = { version = "0.10", features = ["lucide"] }
 # Cargo.toml already documents for its own identical lines.
 rust_decimal = "1"
 chrono = "0.4"
+# Encodes a holding's small in-row thumbnail JPEG as a data: URI for
+# direct <img> display - already resolved transitively in this
+# workspace's Cargo.lock at this version, so this promotes an existing
+# dependency rather than growing the graph.
+base64 = "0.22"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # rusqlite and sqlite-wasm-rs are already in the dependency graph
@@ -74,3 +79,11 @@ web-sys = { version = "0.3", features = ["Window", "Storage"] }
 # `__wbindgen_describe`. `#[wasm_bindgen_test]` + the matching
 # `wasm-bindgen-cli` runner is the real fix, not a plain runtime.
 wasm-bindgen-test = "0.3"
+# Test-only, to generate an in-process fake JPEG fixture for
+# `components::photo`'s test - same version and feature scoping as the
+# root crate's own (non-test) dependency, same `fake_jpeg` technique
+# `tests/holding_images.rs` already uses natively. Feature-gated to just
+# jpeg/png/webp like the root crate - the full default feature set pulls
+# in a genuinely enormous dependency tree (AVIF's rav1e encoder, TIFF,
+# EXR, GIF...) for what's only ever a test fixture generator here.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }

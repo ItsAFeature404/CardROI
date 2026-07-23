@@ -407,11 +407,13 @@ dependencies = [
 name = "cardroi-web"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "cardroi",
  "chrono",
  "dioxus",
  "dioxus-free-icons",
  "getrandom 0.3.4",
+ "image",
  "rusqlite",
  "rust_decimal",
  "sqlite-wasm-rs",
