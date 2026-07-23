@@ -7,24 +7,29 @@
 //! owns effective.
 //!
 //! Search and the capture actions (Buy/Sell/Comp) are deliberately one
-//! visual unit, not two - both are just ways to begin work. Everything
-//! else (headline value, attention, notable mover, newest addition)
-//! renders below, quieter, answering "what changed" for whoever has
-//! more than a few seconds - "go deeper" needs no content of its own
-//! here at all, since the persistent nav already does that job on every
-//! screen.
+//! visual unit, not two - both are just ways to begin work. Below that,
+//! exactly three named blocks, in this order and no others: **Since you
+//! last opened** (what actually happened - a new addition, a genuine
+//! gain, a comp gone stale), **Collection** (the quiet snapshot - value,
+//! unrealized P&L, coverage), **Suggested next** (task-phrased, not
+//! navigation - what's worth doing about it). "Go deeper" needs no
+//! content of its own here at all, since the persistent nav already
+//! does that job on every screen. No sentence here merely announces the
+//! block beneath it - a section's own label and the items inside it
+//! carry that job instead.
 //!
 //! This screen's emotional space stays orientation only - it never
 //! delivers hard news. The notable-mover line is deliberately
-//! gains-only; a holding that's down significantly belongs on that
-//! holding's own page, not here (see CLAUDE.md's "Emotional spaces"
-//! section). "Total P&L vs. cost basis" stands in for a conventional
-//! dashboard's day-over-day delta line: CardROI stores no periodic
-//! portfolio-value snapshots, so a literal "+2.3% today" figure isn't
-//! something this data model can honestly compute yet - this is the
-//! same cost-basis-relative math the CLI already reports (`cardroi
-//! roi`), just surfaced as the headline delta instead of a time-based
-//! change.
+//! gains-only, and it's information to enjoy, not a task - it appears
+//! only in "since you last opened," never as a suggested action.  A
+//! holding that's down significantly belongs on that holding's own
+//! page, not here (see CLAUDE.md's "Emotional spaces" section).
+//! "Total P&L vs. cost basis" stands in for a conventional dashboard's
+//! day-over-day delta line: CardROI stores no periodic portfolio-value
+//! snapshots, so a literal "+2.3% today" figure isn't something this
+//! data model can honestly compute yet - this is the same
+//! cost-basis-relative math the CLI already reports (`cardroi roi`),
+//! just surfaced as the headline delta instead of a time-based change.
 
 use cardroi::analytics::roi::{RollupPnl, holding_pnl, portfolio_pnl};
 use cardroi::db::repository::Repository;
@@ -32,6 +37,10 @@ use cardroi::error::Result as CardRoiResult;
 use cardroi::models::{Holding, HoldingStatus, Money};
 use chrono::{DateTime, NaiveDate, Utc};
 use dioxus::prelude::*;
+use dioxus_free_icons::Icon;
+use dioxus_free_icons::icons::ld_icons::{
+    LdCircleCheckBig, LdCirclePlus, LdTrendingUp, LdTriangleAlert,
+};
 use rust_decimal::Decimal;
 
 use crate::components::holding_picker::{HoldingOption, load_holding_options};
@@ -80,6 +89,7 @@ pub(crate) struct MoverItem {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct NewestAddition {
+    holding_id: i64,
     card_name: String,
     logged_days_ago: i64,
 }
@@ -231,33 +241,41 @@ pub(crate) fn load_dashboard_data(repo: &Repository) -> CardRoiResult<DashboardD
         .map(|holding| -> CardRoiResult<NewestAddition> {
             let card = repo.get_card(holding.card_id)?;
             Ok(NewestAddition {
+                holding_id: holding.id,
                 card_name: card.display_name(),
                 logged_days_ago: (today - holding.created_at.date_naive()).num_days(),
             })
         })
         .transpose()?;
 
-    // Priority order, capped at two: review what needs attention, then
-    // the notable mover, then the one action that's always safe. Never
-    // depends on Portfolio filtering, which doesn't exist yet - both
-    // "review" actions link straight to a specific holding.
+    // Suggested next: task-phrased, not navigation - what's worth doing,
+    // not what's notable. A genuine gain (`notable_mover`) never appears
+    // here - it's something to enjoy in "since you last opened," not a
+    // task. Priority order, capped at two: review a fresh purchase, then
+    // close out whatever needs a comp, then the one action that's
+    // always safe.
     let mut next_actions = Vec::with_capacity(2);
-    if let Some(candidate) = attention_candidate {
-        let card = repo.get_card(candidate.card_id)?;
+    if let Some(addition) = &newest_addition {
         next_actions.push(NextAction {
-            label: format!("Review {}", card.display_name()),
+            label: format!("Review your new {} purchase", addition.card_name),
             route: Route::HoldingDetailRoute {
-                id: candidate.holding_id,
+                id: addition.holding_id,
             },
         });
     }
-    if let Some(mover) = &notable_mover
+    if let Some(candidate) = attention_candidate
         && next_actions.len() < 2
     {
+        let card = repo.get_card(candidate.card_id)?;
+        let label = if candidate.oldest_comp_date.is_none() {
+            format!("Price your {}", card.display_name())
+        } else {
+            format!("Research a fresh comp for {}", card.display_name())
+        };
         next_actions.push(NextAction {
-            label: format!("Look at {}", mover.card_name),
+            label,
             route: Route::HoldingDetailRoute {
-                id: mover.holding_id,
+                id: candidate.holding_id,
             },
         });
     }
@@ -413,7 +431,6 @@ fn DashboardBody(data: DashboardData) -> Element {
     let rollup = &data.rollup;
     let total_value = rollup.open_cost_basis + rollup.unrealized_pnl;
     let total_pnl = rollup.realized_pnl + rollup.unrealized_pnl;
-    let total_pnl_pct = total_pnl.ratio(rollup.cost_basis);
     let open_count = rollup.holding_count - rollup.closed_count;
     let is_gain = !total_pnl.is_negative();
     let pnl_class = if is_gain { "text-gain" } else { "text-loss" };
@@ -431,6 +448,9 @@ fn DashboardBody(data: DashboardData) -> Element {
         AttentionStatus::NeedsComps { count: 1 } => "1 card needs a fresh comp.".to_string(),
         AttentionStatus::NeedsComps { count } => format!("{count} cards need fresh comps."),
     };
+    let has_news = data.newest_addition.is_some()
+        || data.notable_mover.is_some()
+        || !matches!(data.needs_attention, AttentionStatus::AllFresh);
 
     // Only computed once there's an actual query - an idle search box
     // shouldn't force a render pass over the whole holding list.
@@ -508,46 +528,79 @@ fn DashboardBody(data: DashboardData) -> Element {
                 }
             }
 
-            div { class: "flex flex-col gap-2 text-sm text-text-secondary",
-                p { class: "m-0",
-                    "Your collection is worth "
-                    span { class: "data-numeral text-text-primary", "{money(total_value)}" }
-                    ", based on your latest recorded research."
+            // "Since you last opened": what actually happened, as a
+            // short list of items - not a sentence explaining what's
+            // below. A genuine gain earns its own labeled line
+            // ("Largest gain") rather than a folded-in clause; it's
+            // something to enjoy, never a task, so it appears here and
+            // nowhere else.
+            div { class: "flex flex-col gap-3",
+                p { class: "text-text-tertiary text-xs font-semibold uppercase tracking-wide m-0",
+                    "Since you last opened"
                 }
-                p { class: "data-numeral m-0 {pnl_class}",
-                    "{sign}{money(total_pnl)} since cost basis"
-                    if let Some(pct) = total_pnl_pct {
-                        " ({percent(pct)})"
+                div { class: "flex flex-col gap-2 text-sm",
+                    if let Some(addition) = &data.newest_addition {
+                        div { class: "flex items-center gap-2",
+                            Icon { icon: LdCirclePlus, width: 16, height: 16, class: "text-text-tertiary shrink-0" }
+                            span { "Added {addition.card_name} {logged_recency_phrase(addition.logged_days_ago)}" }
+                        }
                     }
-                }
-                if rollup.appraised_open_count < open_count {
-                    p { class: "text-text-tertiary text-xs m-0",
-                        "Unrealized P&L reflects user-supplied comps, not live market values - {rollup.appraised_open_count}/{open_count} open holdings priced"
+                    if let Some(mover) = &data.notable_mover {
+                        div { class: "flex items-center gap-2",
+                            Icon { icon: LdTrendingUp, width: 16, height: 16, class: "text-gain shrink-0" }
+                            span {
+                                "Largest gain: {mover.card_name} "
+                                span { class: "data-numeral text-gain", "+{percent(mover.unrealized_roi_pct)}" }
+                            }
+                        }
                     }
-                }
-                p { class: "m-0", "{attention_line}" }
-                if let Some(mover) = &data.notable_mover {
-                    p { class: "m-0",
-                        "{mover.card_name} is up "
-                        span { class: "data-numeral text-gain", "{percent(mover.unrealized_roi_pct)}" }
-                        " since you bought it."
+                    if !matches!(data.needs_attention, AttentionStatus::AllFresh) {
+                        div { class: "flex items-center gap-2",
+                            Icon { icon: LdTriangleAlert, width: 16, height: 16, class: "text-text-tertiary shrink-0" }
+                            span { "{attention_line}" }
+                        }
                     }
-                }
-                if let Some(addition) = &data.newest_addition {
-                    p { class: "m-0",
-                        "You logged {addition.card_name} {logged_recency_phrase(addition.logged_days_ago)}."
+                    if !has_news {
+                        p { class: "text-text-secondary m-0", "Nothing new since you were last here." }
                     }
                 }
             }
 
-            div { class: "flex flex-col gap-2 mt-2",
-                p { class: "text-text-secondary text-sm m-0", "What do you want to look at today?" }
-                div { class: "flex gap-2 flex-wrap",
+            // "Collection": the quiet snapshot - two numbers, then
+            // coverage as tiny muted text underneath, never competing
+            // with "since you last opened" for the eye.
+            div { class: "flex flex-col gap-1",
+                p { class: "text-text-tertiary text-xs font-semibold uppercase tracking-wide m-0",
+                    "Collection"
+                }
+                p { class: "data-numeral text-3xl m-0 text-text-primary", "{money(total_value)}" }
+                p { class: "data-numeral text-sm m-0 {pnl_class}", "{sign}{money(total_pnl)} unrealized" }
+                p { class: "text-text-tertiary text-xs m-0 mt-1",
+                    "Based on your latest recorded research"
+                }
+                if rollup.appraised_open_count < open_count {
+                    p { class: "text-text-tertiary text-xs m-0",
+                        "{open_count} holdings - {rollup.appraised_open_count}/{open_count} priced"
+                    }
+                } else {
+                    p { class: "text-text-tertiary text-xs m-0", "{open_count} holdings, fully priced" }
+                }
+            }
+
+            // "Suggested next": task-phrased, not navigation - each row
+            // reads as work worth doing, not a link to somewhere else.
+            div { class: "flex flex-col gap-2",
+                p { class: "text-text-tertiary text-xs font-semibold uppercase tracking-wide m-0",
+                    "Suggested next"
+                }
+                div { class: "flex flex-col gap-1",
                     for action in data.next_actions.iter().cloned() {
                         Link {
+                            key: "{action.label}",
                             to: action.route.clone(),
-                            class: "px-4 py-2 rounded-radius bg-surface text-text-primary border border-border no-underline font-semibold cursor-pointer hover:bg-surface-elevated",
-                            "{action.label}"
+                            class: "flex items-center gap-2 text-text-primary text-sm no-underline hover:text-gold",
+                            Icon { icon: LdCircleCheckBig, width: 14, height: 14, class: "text-text-tertiary shrink-0" }
+                            span { "{action.label}" }
                         }
                     }
                 }
