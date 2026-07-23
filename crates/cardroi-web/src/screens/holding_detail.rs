@@ -31,11 +31,13 @@ use cardroi::models::{
 };
 use chrono::{NaiveDate, Utc};
 use dioxus::prelude::*;
+use dioxus_free_icons::Icon;
+use dioxus_free_icons::icons::ld_icons::LdPencil;
 
 use crate::components::form_field::FormField;
 use crate::web_bridge::WebBridge;
 
-use super::format::{date, money, parse_date, percent};
+use super::format::{date, duration_phrase, money, parse_date, percent};
 
 /// One entry in a holding's ownership timeline - built entirely from data
 /// already recorded (a transaction or a comp), never inferred. Comp
@@ -170,37 +172,6 @@ fn ownership_duration_days(holding: &Holding, today: NaiveDate) -> Option<i64> {
     Some((end - acquired).num_days())
 }
 
-/// "3 years, 4 months" / "5 months" / "12 days" - deliberately coarse
-/// (days become months past 60, months become years past 365) since a
-/// collector reads "three years" faster than "1,186 days." The years
-/// threshold matters: past a year, "13 months" reads worse than "1
-/// year, 1 month" - caught by a test expecting the latter at 400 days.
-fn duration_phrase(days: i64) -> String {
-    if days < 60 {
-        return match days {
-            0 => "less than a day".to_string(),
-            1 => "1 day".to_string(),
-            n => format!("{n} days"),
-        };
-    }
-    if days < 365 {
-        return match days / 30 {
-            1 => "1 month".to_string(),
-            n => format!("{n} months"),
-        };
-    }
-    let years = days / 365;
-    let year_part = match years {
-        1 => "1 year".to_string(),
-        n => format!("{n} years"),
-    };
-    match (days % 365) / 30 {
-        0 => year_part,
-        1 => format!("{year_part}, 1 month"),
-        n => format!("{year_part}, {n} months"),
-    }
-}
-
 /// A stable, unique key for rendering a mixed-variant list of timeline
 /// entries - `TimelineEntry` itself has no single common `id` field
 /// across variants (comps and transactions are different tables).
@@ -300,57 +271,79 @@ fn HoldingDetailBody(
     detail: HoldingDetailData,
     on_changed: EventHandler<()>,
 ) -> Element {
+    // Experimental (Card Details presentation prototype): one page-level
+    // edit toggle replaces the two separate, always-visible "Edit"
+    // affordances that used to sit here - no edit control shows anywhere
+    // on this page until this is switched on.
+    let mut edit_mode = use_signal(|| false);
     let mut editing_holding = use_signal(|| false);
     let mut editing_txn = use_signal(|| None::<i64>);
 
     let notes = detail.holding.notes.as_deref().unwrap_or("").trim();
 
     rsx! {
-        div { class: "p-8 flex flex-col gap-8 max-w-4xl",
-            div {
-                div { class: "flex justify-between items-start",
-                    div {
-                        h1 { class: "text-3xl font-semibold m-0", "{detail.card_name}" }
-                        p { class: "text-text-secondary text-sm mt-1 mb-0", "{detail.set_name} - {detail.status.as_str()}" }
-                        div { class: "flex flex-wrap gap-2 mt-3",
-                            if let Some(serial) = &detail.holding.serial_number {
-                                span { class: "px-2 py-0.5 rounded-radius bg-surface-elevated text-text-secondary text-xs font-data", "#{serial}" }
-                            }
-                            if let Some(grade) = &detail.holding.grade {
-                                span { class: "px-2 py-0.5 rounded-radius bg-gold text-canvas text-xs font-semibold",
-                                    if let Some(company) = &detail.holding.grading_company {
-                                        "{company} {grade}"
-                                    } else {
-                                        "{grade}"
-                                    }
-                                }
-                            }
+        div { class: "p-8 flex flex-col gap-12 max-w-4xl animate-settle-in",
+            // The card's own identity, presented as the object itself -
+            // not a header on a record. `font-brand` is this app's one
+            // typeface reserved for exactly this kind of singular,
+            // non-tabular moment; nothing else on the page shares it.
+            div { class: "relative rounded-[28px] bg-surface p-10",
+                button {
+                    class: "absolute top-6 right-6 w-8 h-8 flex items-center justify-center rounded-full bg-transparent border-none cursor-pointer text-text-tertiary hover:text-gold hover:bg-surface-elevated transition-colors duration-[var(--duration-standard)] ease-standard",
+                    "aria-label": if edit_mode() { "Done editing" } else { "Edit this holding" },
+                    onclick: move |_| {
+                        let next = !edit_mode();
+                        edit_mode.set(next);
+                        if !next {
+                            editing_holding.set(false);
+                            editing_txn.set(None);
                         }
-                        if let Some(days) = detail.ownership_duration_days {
-                            p { class: "text-text-tertiary text-sm mt-2 mb-0",
-                                if detail.status == HoldingStatus::Owned {
-                                    "Yours for {duration_phrase(days)}"
-                                } else {
-                                    "Owned for {duration_phrase(days)}"
-                                }
-                            }
-                        }
+                    },
+                    Icon { icon: LdPencil, width: 16, height: 16 }
+                }
+                h1 { class: "font-brand text-4xl m-0 pr-10", "{detail.card_name}" }
+                p { class: "text-text-secondary text-sm mt-2 mb-0", "{detail.set_name}" }
+                div { class: "flex flex-wrap gap-3 mt-4",
+                    if let Some(serial) = &detail.holding.serial_number {
+                        span { class: "px-2.5 py-1 rounded-[10px] bg-surface-elevated text-text-secondary text-xs font-data", "#{serial}" }
                     }
-                    button {
-                        class: "text-gold text-sm bg-transparent border-none cursor-pointer p-0",
-                        onclick: move |_| editing_holding.set(!editing_holding()),
-                        if editing_holding() { "Cancel" } else { "Edit" }
+                    if let Some(grade) = &detail.holding.grade {
+                        span { class: "px-2.5 py-1 rounded-[10px] bg-gold text-canvas text-xs font-semibold",
+                            if let Some(company) = &detail.holding.grading_company {
+                                "{company} {grade}"
+                            } else {
+                                "{grade}"
+                            }
+                        }
                     }
                 }
-                if editing_holding() {
-                    HoldingEditForm {
-                        key: "{holding_id}",
-                        holding_id,
-                        holding: detail.holding.clone(),
-                        on_saved: move |_| {
-                            editing_holding.set(false);
-                            on_changed.call(());
-                        },
+                if let Some(days) = detail.ownership_duration_days {
+                    p { class: "text-text-tertiary text-sm mt-5 mb-0",
+                        if detail.status == HoldingStatus::Owned {
+                            "Yours for {duration_phrase(days)}"
+                        } else {
+                            "Owned for {duration_phrase(days)}"
+                        }
+                    }
+                }
+                if edit_mode() {
+                    div { class: "mt-6",
+                        button {
+                            class: "text-gold text-sm bg-transparent border-none cursor-pointer p-0",
+                            onclick: move |_| editing_holding.set(!editing_holding()),
+                            if editing_holding() { "Cancel" } else { "Edit details" }
+                        }
+                        if editing_holding() {
+                            HoldingEditForm {
+                                key: "{holding_id}",
+                                holding_id,
+                                holding: detail.holding.clone(),
+                                on_saved: move |_| {
+                                    editing_holding.set(false);
+                                    on_changed.call(());
+                                },
+                            }
+                        }
                     }
                 }
             }
@@ -358,15 +351,12 @@ fn HoldingDetailBody(
             PnlSummary { pnl: detail.pnl.clone() }
 
             if !notes.is_empty() {
-                div {
-                    h2 { class: "text-sm font-semibold text-text-secondary uppercase tracking-wide m-0 mb-2", "Current thoughts" }
-                    p { class: "m-0 whitespace-pre-wrap", "{notes}" }
-                }
+                p { class: "font-brand text-lg text-text-secondary italic m-0 whitespace-pre-wrap", "\u{201c}{notes}\u{201d}" }
             }
 
             div {
-                div { class: "flex justify-between items-center mb-3",
-                    h2 { class: "text-sm font-semibold text-text-secondary uppercase tracking-wide m-0", "Timeline" }
+                div { class: "flex justify-between items-center mb-6",
+                    h2 { class: "text-xs font-medium text-text-tertiary uppercase tracking-wide m-0", "Timeline" }
                     Link {
                         to: crate::routes::Route::CompForHoldingRoute { holding_id },
                         class: "text-gold text-sm no-underline",
@@ -376,11 +366,14 @@ fn HoldingDetailBody(
                 if detail.timeline.is_empty() {
                     p { class: "text-text-secondary m-0", "Nothing recorded yet." }
                 } else {
-                    div { class: "flex flex-col",
+                    // A connected thread down the left edge, not a bordered
+                    // list - this is the ownership's own line running
+                    // through it, not a table of rows.
+                    div { class: "flex flex-col border-l-2 border-border ml-1",
                         for entry in detail.timeline.iter().cloned() {
                             {
                                 let editable_id = timeline_entry_txn_id(&entry);
-                                if editable_id.is_some() && editing_txn() == editable_id {
+                                if edit_mode() && editable_id.is_some() && editing_txn() == editable_id {
                                     let txn_id = editable_id.expect("checked Some above");
                                     let txn = detail
                                         .transactions
@@ -389,14 +382,16 @@ fn HoldingDetailBody(
                                         .cloned()
                                         .expect("every editable timeline entry has a backing transaction");
                                     rsx! {
-                                        TransactionEditForm {
-                                            key: "{timeline_entry_key(&entry)}",
-                                            txn,
-                                            on_saved: move |_| {
-                                                editing_txn.set(None);
-                                                on_changed.call(());
-                                            },
-                                            on_cancel: move |_| editing_txn.set(None),
+                                        div { class: "pl-8 pb-8",
+                                            TransactionEditForm {
+                                                key: "{timeline_entry_key(&entry)}",
+                                                txn,
+                                                on_saved: move |_| {
+                                                    editing_txn.set(None);
+                                                    on_changed.call(());
+                                                },
+                                                on_cancel: move |_| editing_txn.set(None),
+                                            }
                                         }
                                     }
                                 } else {
@@ -405,6 +400,7 @@ fn HoldingDetailBody(
                                             key: "{timeline_entry_key(&entry)}",
                                             entry,
                                             holding_status: detail.status,
+                                            edit_mode: edit_mode(),
                                             on_edit: move |id| editing_txn.set(Some(id)),
                                         }
                                     }
@@ -490,13 +486,20 @@ fn PnlSummary(pnl: HoldingPnl) -> Element {
 
 /// Dispatches one merged-timeline entry to its read-only rendering. Four
 /// of the five variants share an identical label/date/amount/notes/edit
-/// shape (`TimelineRow`, below) - only `Comp` differs enough (a source,
-/// a revised-from comparison, no edit affordance) to render inline here
-/// instead.
+/// shape (`TimelineRow`, below) - `Comp` differs enough (a source, a
+/// revised-from comparison, no edit affordance, quieter emphasis - a
+/// comp is a data point, not an event the way a buy or sell is) to
+/// build its own amount string instead.
+///
+/// Experimental (Card Details presentation prototype): entries no
+/// longer uniformly right-align a dollar figure like a ledger row - a
+/// comp's amount reads quieter than an acquisition's or a sale's, since
+/// the number isn't equally the point in both cases.
 #[component]
 fn TimelineEntryView(
     entry: TimelineEntry,
     holding_status: HoldingStatus,
+    edit_mode: bool,
     on_edit: EventHandler<i64>,
 ) -> Element {
     match entry {
@@ -506,7 +509,7 @@ fn TimelineEntryView(
             total,
             notes,
         } => rsx! {
-            TimelineRow { label: "Bought".to_string(), entry_date, amount: total, notes, edit_id: id, on_edit }
+            TimelineRow { label: "Bought".to_string(), entry_date, amount: money(total), notes, edit_id: Some(id), edit_mode, on_edit, quiet: false }
         },
         TimelineEntry::Adjustment {
             id,
@@ -514,7 +517,7 @@ fn TimelineEntryView(
             total,
             notes,
         } => rsx! {
-            TimelineRow { label: "Cost basis adjustment".to_string(), entry_date, amount: total, notes, edit_id: id, on_edit }
+            TimelineRow { label: "Cost basis adjustment".to_string(), entry_date, amount: money(total), notes, edit_id: Some(id), edit_mode, on_edit, quiet: false }
         },
         TimelineEntry::Sold {
             id,
@@ -522,7 +525,7 @@ fn TimelineEntryView(
             total,
             notes,
         } => rsx! {
-            TimelineRow { label: "Sold".to_string(), entry_date, amount: total, notes, edit_id: id, on_edit }
+            TimelineRow { label: "Sold".to_string(), entry_date, amount: money(total), notes, edit_id: Some(id), edit_mode, on_edit, quiet: false }
         },
         TimelineEntry::LostOrDamaged {
             id,
@@ -544,7 +547,7 @@ fn TimelineEntryView(
                 (None, n) => n,
             };
             rsx! {
-                TimelineRow { label: label.to_string(), entry_date, amount: proceeds, notes: combined_notes, edit_id: id, on_edit }
+                TimelineRow { label: label.to_string(), entry_date, amount: money(proceeds), notes: combined_notes, edit_id: Some(id), edit_mode, on_edit, quiet: false }
             }
         }
         TimelineEntry::Comp {
@@ -554,50 +557,62 @@ fn TimelineEntryView(
             notes,
             revised_from,
             ..
-        } => rsx! {
-            div { class: "flex justify-between items-center py-3 border-b border-border",
-                div {
-                    p { class: "m-0", "Comp - {date(entry_date)}" }
-                    if let Some(source) = &source {
-                        p { class: "text-text-tertiary text-xs m-0 mt-1", "{source}" }
-                    }
-                    if let Some(prev) = revised_from {
-                        p { class: "text-text-tertiary text-xs m-0 mt-1", "Revised from {money(prev)}" }
-                    }
-                    if let Some(n) = &notes {
-                        p { class: "text-text-secondary text-sm m-0 mt-1", "{n}" }
-                    }
-                }
-                p { class: "data-numeral m-0", "{money(value)}" }
+        } => {
+            let label = source.unwrap_or_else(|| "Comp".to_string());
+            let amount = match revised_from {
+                Some(prev) => format!("{} (from {})", money(value), money(prev)),
+                None => money(value),
+            };
+            rsx! {
+                TimelineRow { label, entry_date, amount, notes, edit_id: None, edit_mode, on_edit, quiet: true }
             }
-        },
+        }
     }
 }
 
+/// Experimental (Card Details presentation prototype): a shared node on
+/// the ownership's own connecting thread (see the parent's `border-l-2`)
+/// rather than a bordered table row - a small marker instead of a
+/// horizontal rule, generous space instead of a divider. Edit disappears
+/// entirely unless the page is in `edit_mode`.
 #[component]
 fn TimelineRow(
     label: String,
     entry_date: NaiveDate,
-    amount: Money,
+    amount: String,
     notes: Option<String>,
-    edit_id: i64,
+    edit_id: Option<i64>,
+    edit_mode: bool,
     on_edit: EventHandler<i64>,
+    quiet: bool,
 ) -> Element {
+    let amount_class = if quiet {
+        "data-numeral text-sm text-text-tertiary m-0"
+    } else {
+        "data-numeral text-lg m-0"
+    };
     rsx! {
-        div { class: "flex justify-between items-center py-3 border-b border-border",
-            div {
-                p { class: "m-0", "{label}" }
-                p { class: "text-text-tertiary text-xs m-0 mt-1", "{date(entry_date)}" }
-                if let Some(n) = &notes {
-                    p { class: "text-text-secondary text-sm m-0 mt-1", "{n}" }
+        div { class: "relative pl-8 pb-8 last:pb-0",
+            span { class: "absolute -left-[7px] top-1 w-3 h-3 rounded-full bg-gold" }
+            div { class: "flex justify-between items-start gap-4",
+                div {
+                    p { class: "m-0", "{label}" }
+                    p { class: "text-text-tertiary text-xs m-0 mt-1", "{date(entry_date)}" }
+                    if let Some(n) = &notes {
+                        p { class: "text-text-secondary text-sm m-0 mt-2", "{n}" }
+                    }
                 }
-            }
-            div { class: "flex items-center gap-3",
-                p { class: "data-numeral m-0", "{money(amount)}" }
-                button {
-                    class: "text-gold text-sm bg-transparent border-none cursor-pointer p-0",
-                    onclick: move |_| on_edit.call(edit_id),
-                    "Edit"
+                div { class: "flex items-center gap-3 shrink-0",
+                    p { class: amount_class, "{amount}" }
+                    if edit_mode {
+                        if let Some(id) = edit_id {
+                            button {
+                                class: "text-gold text-sm bg-transparent border-none cursor-pointer p-0",
+                                onclick: move |_| on_edit.call(id),
+                                "Edit"
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1471,16 +1486,5 @@ mod tests {
             ownership_duration_days(&holding, test_date(2026, 12, 31)),
             Some(5)
         );
-    }
-
-    #[wasm_bindgen_test]
-    fn duration_phrase_is_coarse_and_reads_naturally() {
-        assert_eq!(duration_phrase(0), "less than a day");
-        assert_eq!(duration_phrase(1), "1 day");
-        assert_eq!(duration_phrase(4), "4 days");
-        assert_eq!(duration_phrase(90), "3 months");
-        assert_eq!(duration_phrase(400), "1 year, 1 month");
-        assert_eq!(duration_phrase(800), "2 years, 2 months");
-        assert_eq!(duration_phrase(730), "2 years");
     }
 }

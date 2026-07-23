@@ -63,15 +63,51 @@ pub fn parse_date(s: &str) -> Result<NaiveDate, String> {
         .map_err(|_| format!("invalid date {s:?}, expected MM-DD-YYYY"))
 }
 
+/// "3 years, 4 months" / "5 months" / "12 days" - deliberately coarse
+/// (days become months past 60, months become years past 365) since a
+/// collector reads "three years" faster than "1,186 days." The years
+/// threshold matters: past a year, "13 months" reads worse than "1
+/// year, 1 month" - caught by a test expecting the latter at 400 days.
+/// Lives here rather than privately in `holding_detail.rs` (its one
+/// current caller) since duration formatting is a general need other
+/// screens - Reports, most likely - are the next to want.
+pub fn duration_phrase(days: i64) -> String {
+    if days < 60 {
+        return match days {
+            0 => "less than a day".to_string(),
+            1 => "1 day".to_string(),
+            n => format!("{n} days"),
+        };
+    }
+    if days < 365 {
+        return match days / 30 {
+            1 => "1 month".to_string(),
+            n => format!("{n} months"),
+        };
+    }
+    let years = days / 365;
+    let year_part = match years {
+        1 => "1 year".to_string(),
+        n => format!("{n} years"),
+    };
+    match (days % 365) / 30 {
+        0 => year_part,
+        1 => format!("{year_part}, 1 month"),
+        n => format!("{year_part}, {n} months"),
+    }
+}
+
 // No `jpeg_data_uri` here - card-photo capture is explicitly out of
 // scope for a browser tab, so pulling in `base64` for a function nothing
 // here would ever call isn't warranted.
 
 #[cfg(test)]
 mod tests {
+    use wasm_bindgen_test::wasm_bindgen_test;
+
     use super::*;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn formats_with_grouping_and_sign() {
         assert_eq!(money(Money::from_cents(123_401_935)), "$1,234,019.35");
         assert_eq!(money(Money::from_cents(-4200)), "-$42.00");
@@ -80,18 +116,18 @@ mod tests {
         assert_eq!(money(Money::from_cents(100_000)), "$1,000.00");
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn formats_percent_to_two_decimal_places() {
         assert_eq!(percent(Decimal::new(1240, 4)), "12.40%");
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn date_formats_as_mm_dd_yyyy_not_the_clis_iso_format() {
         let d = NaiveDate::from_ymd_opt(2026, 7, 19).unwrap();
         assert_eq!(date(d), "07-19-2026");
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn parse_date_accepts_mm_dd_yyyy_and_rejects_the_clis_iso_format() {
         assert_eq!(
             parse_date("07-19-2026"),
@@ -103,7 +139,7 @@ mod tests {
         assert!(parse_date("not a date").is_err());
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn rounds_half_up_instead_of_truncating() {
         // 23/63 = 0.36507936...%, which formatting-by-truncation would
         // wrongly render as "36.50%" instead of the correctly-rounded
@@ -112,5 +148,16 @@ mod tests {
         let ratio = Decimal::from(23) / Decimal::from(63);
         assert_eq!(percent(ratio), "36.51%");
         assert_eq!(percent(-ratio), "-36.51%");
+    }
+
+    #[wasm_bindgen_test]
+    fn duration_phrase_is_coarse_and_reads_naturally() {
+        assert_eq!(duration_phrase(0), "less than a day");
+        assert_eq!(duration_phrase(1), "1 day");
+        assert_eq!(duration_phrase(4), "4 days");
+        assert_eq!(duration_phrase(90), "3 months");
+        assert_eq!(duration_phrase(400), "1 year, 1 month");
+        assert_eq!(duration_phrase(800), "2 years, 2 months");
+        assert_eq!(duration_phrase(730), "2 years");
     }
 }

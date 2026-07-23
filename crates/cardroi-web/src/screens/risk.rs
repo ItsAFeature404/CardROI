@@ -428,9 +428,11 @@ fn slot_color(i: usize, total: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use wasm_bindgen_test::wasm_bindgen_test;
+
     use super::*;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn a_full_circle_slice_has_visually_distinct_start_and_end_points() {
         let path = donut_slice_path(0.0, 360.0, 90.0, 90.0, 82.0, 50.0);
         assert!(
@@ -439,7 +441,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn a_partial_slice_is_unaffected_by_the_full_circle_clamp() {
         let unclamped = donut_slice_path(0.0, 90.0, 90.0, 90.0, 82.0, 50.0);
         let point = |angle_deg: f64, r: f64| {

@@ -50,3 +50,22 @@ body {
   font-family: var(--font-brand);
   font-weight: var(--font-weight-brand);
 }
+
+/* Experimental (Card Details presentation prototype): a page settling
+ * into place on load, using the app's one existing motion curve rather
+ * than inventing new physics. Motion marking "you just arrived here,"
+ * not decoration. */
+@keyframes settle-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-settle-in {
+  animation: settle-in var(--duration-standard) var(--ease-standard);
+}
