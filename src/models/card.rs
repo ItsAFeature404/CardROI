@@ -58,6 +58,43 @@ impl NewCard {
     }
 }
 
+/// Corrects a card's own catalog identity after the fact - player name,
+/// card number, variant/parallel/print run, and the rookie/autograph/
+/// relic flags. Deliberately excludes `set_id`: moving a card to a
+/// different set is a rarer, bigger operation (re-checking uniqueness
+/// within the new set, etc.) than fixing a typo, and isn't this struct's
+/// job. Affects every holding that references this card - it's the same
+/// catalog print, correctly shared, not a per-holding fact.
+#[derive(Debug, Clone, Default)]
+pub struct CardEdit {
+    pub card_number: String,
+    pub player_name: String,
+    pub variant: Option<String>,
+    pub parallel_name: Option<String>,
+    pub print_run: Option<i32>,
+    pub is_rookie: bool,
+    pub is_autograph: bool,
+    pub is_relic: bool,
+    pub notes: Option<String>,
+}
+
+impl CardEdit {
+    pub fn validate(&self) -> Result<()> {
+        if self.card_number.trim().is_empty() {
+            return Err(CardRoiError::validation("card_number must not be empty"));
+        }
+        if self.player_name.trim().is_empty() {
+            return Err(CardRoiError::validation("player_name must not be empty"));
+        }
+        if let Some(run) = self.print_run
+            && run <= 0
+        {
+            return Err(CardRoiError::validation("print_run must be positive"));
+        }
+        Ok(())
+    }
+}
+
 impl Card {
     /// Human-readable identity for display in tables and reports, e.g.
     /// `"LeBron James #123 (Refractor, Gold /25)"` - player name leads,
@@ -141,6 +178,52 @@ mod tests {
             ..valid_card()
         };
         assert!(card.validate().is_err());
+    }
+
+    fn valid_card_edit() -> CardEdit {
+        CardEdit {
+            card_number: "123".to_string(),
+            player_name: "LeBron James".to_string(),
+            variant: Some("Refractor".to_string()),
+            parallel_name: Some("Gold".to_string()),
+            print_run: Some(25),
+            is_rookie: false,
+            is_autograph: false,
+            is_relic: false,
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn accepts_a_well_formed_card_edit() {
+        assert!(valid_card_edit().validate().is_ok());
+    }
+
+    #[test]
+    fn card_edit_rejects_empty_card_number() {
+        let edit = CardEdit {
+            card_number: "".to_string(),
+            ..valid_card_edit()
+        };
+        assert!(edit.validate().is_err());
+    }
+
+    #[test]
+    fn card_edit_rejects_empty_player_name() {
+        let edit = CardEdit {
+            player_name: "  ".to_string(),
+            ..valid_card_edit()
+        };
+        assert!(edit.validate().is_err());
+    }
+
+    #[test]
+    fn card_edit_rejects_non_positive_print_run() {
+        let edit = CardEdit {
+            print_run: Some(0),
+            ..valid_card_edit()
+        };
+        assert!(edit.validate().is_err());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use rusqlite::{Row, params};
 
 use crate::error::{CardRoiError, Result};
-use crate::models::{Card, NewCard};
+use crate::models::{Card, CardEdit, NewCard};
 
 use super::{Repository, parse_timestamp};
 
@@ -72,6 +72,37 @@ impl Repository {
             row_to_card,
         )?;
         rows.next().transpose().map_err(Into::into)
+    }
+
+    /// Corrects a card's own catalog identity - affects every holding
+    /// that references it, correctly, since they're all the same
+    /// catalog print (see `CardEdit`'s doc comment). Does not touch
+    /// `set_id` - `CardEdit` has no field for it.
+    pub fn update_card(&self, id: i64, edit: &CardEdit) -> Result<Card> {
+        edit.validate()?;
+        let affected = self.conn.execute(
+            "UPDATE cards SET
+                card_number = ?2, player_name = ?3, variant = ?4, parallel_name = ?5,
+                print_run = ?6, is_rookie = ?7, is_autograph = ?8, is_relic = ?9, notes = ?10,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?1",
+            params![
+                id,
+                edit.card_number,
+                edit.player_name,
+                edit.variant,
+                edit.parallel_name,
+                edit.print_run,
+                edit.is_rookie,
+                edit.is_autograph,
+                edit.is_relic,
+                edit.notes,
+            ],
+        )?;
+        if affected == 0 {
+            return Err(CardRoiError::not_found("card", id));
+        }
+        self.get_card(id)
     }
 
     pub fn delete_card(&self, id: i64) -> Result<()> {

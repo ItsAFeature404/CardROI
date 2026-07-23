@@ -10,7 +10,7 @@ pub mod set;
 pub mod transaction;
 
 pub use appraisal::{Appraisal, NewAppraisal};
-pub use card::{Card, NewCard};
+pub use card::{Card, CardEdit, NewCard};
 pub use holding::{Holding, HoldingEdit, HoldingStatus, NewHolding};
 pub use holding_image::HoldingImage;
 pub use money::Money;

@@ -161,18 +161,6 @@ fn parse_date_or_today(s: &str) -> CardRoiResult<NaiveDate> {
     }
 }
 
-fn parse_optional_i32(s: &str) -> CardRoiResult<Option<i32>> {
-    use cardroi::error::CardRoiError;
-    if s.trim().is_empty() {
-        Ok(None)
-    } else {
-        s.trim()
-            .parse::<i32>()
-            .map(Some)
-            .map_err(|_| CardRoiError::validation(format!("expected a whole number, got {s:?}")))
-    }
-}
-
 fn build_transaction(holding_id: i64, inputs: &AcquisitionInputs) -> CardRoiResult<NewTransaction> {
     let price = parse_money_or_zero(&inputs.price)?;
     let fees = parse_money_or_zero(&inputs.fees)?;
@@ -230,8 +218,10 @@ pub(crate) fn submit_new_card(
 ) -> CardRoiResult<Money> {
     use cardroi::error::CardRoiError;
 
-    let year = parse_optional_i32(&card_inputs.year)?;
-    let print_run = parse_optional_i32(&card_inputs.print_run)?;
+    let year = crate::screens::format::parse_optional_i32(&card_inputs.year)
+        .map_err(CardRoiError::validation)?;
+    let print_run = crate::screens::format::parse_optional_i32(&card_inputs.print_run)
+        .map_err(CardRoiError::validation)?;
     if card_inputs.set_name.trim().is_empty() {
         return Err(CardRoiError::validation("set name must not be empty"));
     }

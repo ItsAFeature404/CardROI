@@ -26,22 +26,22 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use cardroi::analytics::roi::{self, HoldingPnl};
 use cardroi::analytics::whatif::{self, HypotheticalSale, PriceSource, WhatIfResult};
-use cardroi::db::repository::Repository;
+use cardroi::db::repository::{PhotoStorage, Repository};
 use cardroi::error::Result as CardRoiResult;
 use cardroi::models::{
-    Appraisal, Holding, HoldingEdit, HoldingImage, HoldingStatus, Money, Transaction,
-    TransactionEdit, TransactionType,
+    Appraisal, Card, CardEdit, Holding, HoldingEdit, HoldingImage, HoldingStatus, Money,
+    Transaction, TransactionEdit, TransactionType,
 };
 use chrono::{NaiveDate, Utc};
 use dioxus::prelude::*;
 use dioxus_free_icons::Icon;
-use dioxus_free_icons::icons::ld_icons::{LdImage, LdPencil};
+use dioxus_free_icons::icons::ld_icons::{LdImage, LdPencil, LdX};
 
 use crate::components::form_field::FormField;
 use crate::components::photo::PhotoCapture;
 use crate::web_bridge::WebBridge;
 
-use super::format::{date, duration_phrase, money, parse_date, percent};
+use super::format::{date, duration_phrase, money, parse_date, parse_optional_i32, percent};
 
 /// One entry in a holding's ownership timeline - built entirely from data
 /// already recorded (a transaction or a comp), never inferred. Comp
@@ -204,6 +204,7 @@ fn timeline_entry_txn_id(entry: &TimelineEntry) -> Option<i64> {
 #[derive(Clone, Debug, PartialEq)]
 struct HoldingDetailData {
     holding: Holding,
+    card: Card,
     card_name: String,
     set_name: String,
     status: HoldingStatus,
@@ -240,6 +241,7 @@ fn load_holding_detail(holding_id: i64, repo: &Repository) -> CardRoiResult<Hold
         status: holding.status,
         ownership_duration_days,
         holding,
+        card,
         pnl,
         timeline,
         transactions,
@@ -285,8 +287,10 @@ fn HoldingDetailBody(
     // edit toggle replaces the two separate, always-visible "Edit"
     // affordances that used to sit here - no edit control shows anywhere
     // on this page until this is switched on.
+    let bridge = use_context::<WebBridge>();
     let mut edit_mode = use_signal(|| false);
     let mut editing_holding = use_signal(|| false);
+    let mut editing_card = use_signal(|| false);
     let mut editing_txn = use_signal(|| None::<i64>);
 
     let notes = detail.holding.notes.as_deref().unwrap_or("").trim();
@@ -306,6 +310,7 @@ fn HoldingDetailBody(
                         edit_mode.set(next);
                         if !next {
                             editing_holding.set(false);
+                            editing_card.set(false);
                             editing_txn.set(None);
                         }
                     },
@@ -314,13 +319,34 @@ fn HoldingDetailBody(
                 div { class: "flex gap-4 items-start",
                     // A fixed-size slot regardless of whether a photo
                     // exists yet, so adding one later never reshuffles
-                    // the hero's geometry.
-                    div { class: "w-32 h-32 shrink-0 rounded-2xl overflow-hidden bg-surface-elevated flex items-center justify-center",
+                    // the hero's geometry. `group` + opacity-0/group-
+                    // hover:opacity-100 on the delete button below - it's
+                    // only ever discoverable by hovering the photo
+                    // itself, not a separate always-visible control.
+                    div { class: "group relative w-32 h-32 shrink-0 rounded-2xl overflow-hidden bg-surface-elevated flex items-center justify-center",
                         if let Some(photo) = &detail.primary_photo {
                             img {
                                 class: "w-full h-full object-cover",
                                 src: "data:image/jpeg;base64,{BASE64.encode(&photo.thumbnail_data)}",
                                 alt: "{detail.card_name}",
+                            }
+                            button {
+                                class: "absolute top-1 right-1 w-6 h-6 flex items-center justify-center rounded-full bg-canvas/70 text-text-tertiary opacity-0 group-hover:opacity-100 border-none cursor-pointer transition-opacity duration-[var(--duration-standard)] ease-standard hover:text-loss",
+                                "aria-label": "Remove photo",
+                                onclick: {
+                                    let bridge = bridge.clone();
+                                    let photo_id = photo.id;
+                                    move |_| {
+                                        let bridge = bridge.clone();
+                                        spawn(async move {
+                                            let _ = bridge
+                                                .run(move |repo| repo.delete_photo(photo_id, PhotoStorage::Inline))
+                                                .await;
+                                            on_changed.call(());
+                                        });
+                                    }
+                                },
+                                Icon { icon: LdX, width: 14, height: 14 }
                             }
                         } else {
                             Icon { icon: LdImage, width: 24, height: 24, class: "text-text-tertiary opacity-50" }
@@ -368,6 +394,21 @@ fn HoldingDetailBody(
                                 holding: detail.holding.clone(),
                                 on_saved: move |_| {
                                     editing_holding.set(false);
+                                    on_changed.call(());
+                                },
+                            }
+                        }
+                        button {
+                            class: "text-gold text-sm bg-transparent border-none cursor-pointer p-0",
+                            onclick: move |_| editing_card.set(!editing_card()),
+                            if editing_card() { "Cancel" } else { "Edit card details" }
+                        }
+                        if editing_card() {
+                            CardEditForm {
+                                key: "{detail.card.id}",
+                                card: detail.card.clone(),
+                                on_saved: move |_| {
+                                    editing_card.set(false);
                                     on_changed.call(());
                                 },
                             }
@@ -1045,6 +1086,140 @@ fn HoldingEditForm(holding_id: i64, holding: Holding, on_saved: EventHandler<()>
     }
 }
 
+/// The card-identity edit form's raw text inputs, grouped for the same
+/// reason as `HoldingEditInputs` above.
+#[derive(Clone, Debug, Default)]
+struct CardEditInputs {
+    card_number: String,
+    player_name: String,
+    variant: String,
+    parallel_name: String,
+    print_run: String,
+    is_rookie: bool,
+    is_autograph: bool,
+    is_relic: bool,
+    notes: String,
+}
+
+fn submit_card_edit(
+    card_id: i64,
+    inputs: CardEditInputs,
+    repo: &Repository,
+) -> CardRoiResult<Card> {
+    use cardroi::error::CardRoiError;
+
+    let non_empty = |s: String| (!s.trim().is_empty()).then_some(s);
+    let print_run = parse_optional_i32(&inputs.print_run).map_err(CardRoiError::validation)?;
+    let edit = CardEdit {
+        card_number: inputs.card_number,
+        player_name: inputs.player_name,
+        variant: non_empty(inputs.variant),
+        parallel_name: non_empty(inputs.parallel_name),
+        print_run,
+        is_rookie: inputs.is_rookie,
+        is_autograph: inputs.is_autograph,
+        is_relic: inputs.is_relic,
+        notes: non_empty(inputs.notes),
+    };
+    repo.update_card(card_id, &edit)
+}
+
+/// Corrects a card's own catalog identity (player, number, variant/
+/// parallel/print run, rookie/autograph/relic, notes) - not which
+/// holding it is or that holding's own grading/serial details (those are
+/// `HoldingEditForm`'s job, right above this toggle). Affects every
+/// holding that references this card, correctly, since they're all the
+/// same catalog print (see `cardroi::models::CardEdit`'s doc comment).
+#[component]
+fn CardEditForm(card: Card, on_saved: EventHandler<()>) -> Element {
+    let bridge = use_context::<WebBridge>();
+    let card_id = card.id;
+    let card_number_input = use_signal(|| card.card_number.clone());
+    let player_name_input = use_signal(|| card.player_name.clone());
+    let variant_input = use_signal(|| card.variant.clone().unwrap_or_default());
+    let parallel_name_input = use_signal(|| card.parallel_name.clone().unwrap_or_default());
+    let print_run_input = use_signal(|| card.print_run.map(|r| r.to_string()).unwrap_or_default());
+    let mut is_rookie = use_signal(|| card.is_rookie);
+    let mut is_autograph = use_signal(|| card.is_autograph);
+    let mut is_relic = use_signal(|| card.is_relic);
+    let notes_input = use_signal(|| card.notes.clone().unwrap_or_default());
+    let mut error = use_signal(|| None::<String>);
+
+    let submit = move |_| {
+        let bridge = bridge.clone();
+        let inputs = CardEditInputs {
+            card_number: card_number_input(),
+            player_name: player_name_input(),
+            variant: variant_input(),
+            parallel_name: parallel_name_input(),
+            print_run: print_run_input(),
+            is_rookie: is_rookie(),
+            is_autograph: is_autograph(),
+            is_relic: is_relic(),
+            notes: notes_input(),
+        };
+        spawn(async move {
+            let outcome = bridge
+                .run(move |repo| submit_card_edit(card_id, inputs, repo))
+                .await;
+            match outcome {
+                Ok(_) => {
+                    error.set(None);
+                    on_saved.call(());
+                }
+                Err(err) => error.set(Some(err.to_string())),
+            }
+        });
+    };
+
+    rsx! {
+        div { class: "mt-3 p-4 bg-surface rounded-radius flex flex-col gap-3",
+            div { class: "grid grid-cols-2 sm:grid-cols-3 gap-3",
+                FormField { label: "Player", value: player_name_input, placeholder: "e.g. LeBron James" }
+                FormField { label: "Card number", value: card_number_input, placeholder: "e.g. 123" }
+                FormField { label: "Variant", value: variant_input, placeholder: "e.g. Refractor" }
+                FormField { label: "Parallel", value: parallel_name_input, placeholder: "e.g. Gold" }
+                FormField { label: "Print run", value: print_run_input, placeholder: "e.g. 25" }
+                FormField { label: "Notes", value: notes_input, placeholder: "" }
+            }
+            div { class: "flex flex-wrap gap-4",
+                label { class: "flex items-center gap-2 text-text-secondary text-sm",
+                    input {
+                        r#type: "checkbox",
+                        checked: is_rookie(),
+                        onchange: move |evt| is_rookie.set(evt.checked()),
+                    }
+                    "Rookie"
+                }
+                label { class: "flex items-center gap-2 text-text-secondary text-sm",
+                    input {
+                        r#type: "checkbox",
+                        checked: is_autograph(),
+                        onchange: move |evt| is_autograph.set(evt.checked()),
+                    }
+                    "Autograph"
+                }
+                label { class: "flex items-center gap-2 text-text-secondary text-sm",
+                    input {
+                        r#type: "checkbox",
+                        checked: is_relic(),
+                        onchange: move |evt| is_relic.set(evt.checked()),
+                    }
+                    "Relic"
+                }
+            }
+            button {
+                class: "px-4 py-2 rounded-radius bg-gold text-canvas border-none font-semibold cursor-pointer self-start",
+                onclick: submit,
+                "Save"
+            }
+            if let Some(err) = error() {
+                p { class: "text-loss m-0", "{err}" }
+            }
+        }
+    }
+}
+
 /// The transaction edit form's raw text inputs, grouped for the same
 /// reason as the other forms' input-groupings above.
 #[derive(Clone, Debug, Default)]
@@ -1342,6 +1517,37 @@ mod tests {
             1,
             "only the original acquisition should exist"
         );
+    }
+
+    #[wasm_bindgen_test]
+    fn submit_card_edit_corrects_the_catalog_entry_and_leaves_other_fields_alone() {
+        let (repo, holding_id) = repo_with_owned_holding();
+        let card_id = repo.get_holding(holding_id).unwrap().card_id;
+
+        let updated = submit_card_edit(
+            card_id,
+            CardEditInputs {
+                card_number: "1".to_string(),
+                player_name: "Test Player".to_string(),
+                variant: "Refractor".to_string(),
+                parallel_name: "Gold".to_string(),
+                print_run: "25".to_string(),
+                is_rookie: true,
+                is_autograph: false,
+                is_relic: false,
+                notes: String::new(),
+            },
+            &repo,
+        )
+        .unwrap();
+
+        assert_eq!(updated.variant.as_deref(), Some("Refractor"));
+        assert_eq!(updated.parallel_name.as_deref(), Some("Gold"));
+        assert_eq!(updated.print_run, Some(25));
+        assert!(updated.is_rookie);
+        // Confirmed via the real repository round-trip, not just the
+        // returned value - proves the row itself was actually updated.
+        assert_eq!(repo.get_card(card_id).unwrap(), updated);
     }
 
     #[wasm_bindgen_test]

@@ -63,6 +63,21 @@ pub fn parse_date(s: &str) -> Result<NaiveDate, String> {
         .map_err(|_| format!("invalid date {s:?}, expected MM-DD-YYYY"))
 }
 
+/// An empty string means "not set," matching every other optional
+/// `FormField` in this crate - shared by the Buy form's new-card path and
+/// Card Details' card-edit form, both of which collect `print_run` as
+/// plain text.
+pub fn parse_optional_i32(s: &str) -> Result<Option<i32>, String> {
+    if s.trim().is_empty() {
+        Ok(None)
+    } else {
+        s.trim()
+            .parse::<i32>()
+            .map(Some)
+            .map_err(|_| format!("expected a whole number, got {s:?}"))
+    }
+}
+
 /// "3 years, 4 months" / "5 months" / "12 days" - deliberately coarse
 /// (days become months past 60, months become years past 365) since a
 /// collector reads "three years" faster than "1,186 days." The years
